@@ -65,7 +65,7 @@ fn download_video_sync(url: &str) {
 
 fn main() {
     // A simple public domain / test video URL
-    let target_url = "https://hls.strpst.com/records/228796749/2026/07/08/mrg_228796749_436_SBTeSRBUoG6Fyeay_1783492636.mp4";
+    let target_url = "URL goes here";
 
     println!("---- Phase 1: Synchronous Download Test ---- ");
 
