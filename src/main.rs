@@ -1,4 +1,4 @@
-use std::process::{Command, Stdio};
+/*use std::process::{Command, Stdio};
 use std::io::{BufRead, BufReader};
 
 /// This represents our "Domain Layer" isolated in a single function.
@@ -73,4 +73,84 @@ fn main() {
     download_video_sync(target_url);
 
     println!("Program finished.");
+}*/
+
+
+use std::process::Stdio;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::mpsc;
+
+/// The messages our background task will send to the main thread. 
+pub enum DownloadState {
+    Progress(String), // Later we'll change this to f64 percentage
+    Success, 
+    Error,
+}
+
+async fn perform_download(url: String, tx: mpsc::Sender<DownloadState>) {
+    let mut child = Command::new("yt-dlp")
+        .arg("--js-runtime")
+        .arg("node")
+        .arg("--force-overwrites")
+        .arg("-f")
+        .arg("bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4]/best")
+        .arg("-P")
+        .arg("/mnt/e/my_files")
+        .arg(&url) // Borrow it here for the command. Why not own? 
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("Failed to execute yt-dlp");
+
+    if let Some(stdout) = child.stdout.take() {
+        let mut reader = BufReader::new(stdout).lines();
+
+        while let Ok(Some(line)) = reader.next_line().await {
+            // Send the raw text line to the UI
+            let _ = tx.send(DownloadState::Progress(line)).await;
+        }
+    }
+
+    let status = child.wait().await.expect("Failed to wait on child process");
+
+    if status.success() {
+        let _ = tx.send(DownloadState::Success).await;
+    } else {
+        let _ = tx.send(DownloadState::Error).await;
+    }
+}
+
+#[tokio::main]
+async fn main() {
+    let target_url = "https://tulipvid.net/videos/Bettie_Bondage_Tricking-Your-Best-Friends-Wife_converted.m3u8";
+
+    // 1. Create the channel
+    let (tx, mut rx) = mpsc::channel::<DownloadState>(32); // Why the number?
+                                                           // Why is rx mutable? 
+
+    println!("----- Phase 2: Refactored Asynchronous Decoupling -----\n");
+
+    // 2. Spawn the task
+    // We clone 'tx' so the background task gets its own copy.
+    // The main thread keep the original 'tx'.
+    // We also convert the string literal to an owned `String`. Why did we do it? 
+    tokio::spawn(perform_download(target_url.to_string(), tx.clone())); // why did we clone tx?
+
+    // We could do a second download right here!
+    // tokio::spawn(perform_download(target_url.to_string(), tx.clone())); // why did we clone tx?
+
+    // 3. The Main Thread UI Loop
+    while let Some(message) = rx.recv().await {
+        match message {
+            DownloadState::Progress(line) => println!("[BACKGROUND] {}", line), 
+            DownloadState::Success => {
+                println!("\n[MAIN] Download finished!");
+                break;
+            }
+            DownloadState::Error => {
+                println!("\n[MAIN] Download failed!");
+                break;
+            }
+        }
+    }
 }
