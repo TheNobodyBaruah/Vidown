@@ -91,7 +91,8 @@ static PROGRESS_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 /// The messages our background task will send to the main thread. 
 pub enum DownloadState {
-    Progress(f64), // Later we'll change this to f64 percentage
+    Downloading { track: u8, percent: f64 }, // Later we'll change this to f64 percentage
+    Merging, // Tell the UI we are using FFmpeg now for muxing
     Success, 
     Error,
 }
@@ -125,8 +126,28 @@ async fn perform_download(url: String, tx: mpsc::Sender<DownloadState>) {
     if let Some(stdout) = child.stdout.take() {
         let mut reader = BufReader::new(stdout).lines();
 
+        // Keep track of which file we are currently downloading
+        let mut current_track = 0;
+
         while let Ok(Some(line)) = reader.next_line().await {
 
+            // STATE CHECK A: Are we starting a new file?
+            if line.contains("[download] Destination:") {
+                current_track += 1;
+                continue; // Skips regex parsing for this line
+            }
+
+            // STATE CHECK B: Are we merging?
+            if line.contains("[Merger]") {
+                if tx.send(DownloadState::Merging).await.is_err() {
+                    let _ = child.kill().await;
+                    return;
+                }
+
+                continue; // Skips regex parsing
+            }
+
+            // STATTE CHECK C: Update Progress
             // Search the line for the regex pattern
             // if let Some(captures) = re.captures(&line) {
             // Use the globally compiled regex
@@ -137,9 +158,15 @@ async fn perform_download(url: String, tx: mpsc::Sender<DownloadState>) {
                     if let Ok(percentage) = matched.as_str().parse::<f64>() {
                         // Send the clean f64 to the UI thread
                         // let _ = tx.send(DownloadState::Progress(percentage)).await;
-                        //
+                        
+                        // Fallback in case we missed the Destination Line
+                        let track = if current_track == 0 {
+                            1
+                        } else {
+                            current_track
+                        };
                         // Handle a dropped receiver (eg. TUI was closed)
-                        if tx.send(DownloadState::Progress(percentage)).await.is_err() {
+                        if tx.send(DownloadState::Downloading { track, percent: percentage}).await.is_err() {
                             // The main UUI thread has closed the channel.
                             // Kill the child process so it doesn't become a zombie
                             // downloading gigabytes of data in the background
@@ -163,7 +190,7 @@ async fn perform_download(url: String, tx: mpsc::Sender<DownloadState>) {
 
 #[tokio::main]
 async fn main() {
-    let target_url = "https://www.youtube.com/watch?v=rH3zE7VlIMs";
+    let target_url = "https://www.youtube.com/watch?v=FmuPoaWmRQ8";
 
     // 1. Create the channel
     let (tx, mut rx) = mpsc::channel::<DownloadState>(32); // Why the number?
@@ -197,11 +224,15 @@ async fn main() {
     // 3. The Main Thread UI Loop
     while let Some(message) = rx.recv().await {
         match message {
-            DownloadState::Progress(percent) => println!("[BACKGROUND] {}", percent), 
+            DownloadState::Downloading{ track, percent } => println!("[BACKGROUND] Track {} - {}", track, percent), 
 
             DownloadState::Success => {
                 println!("\n[MAIN] Download finished!");
                 break;
+            }
+
+            DownloadState::Merging => {
+                println!("\n[BACKGROUND] Merging Audio and Video with FFmpeg... Please wait.");
             }
 
             DownloadState::Error => {
