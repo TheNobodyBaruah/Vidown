@@ -65,7 +65,7 @@ fn download_video_sync(url: &str) {
 
 fn main() {
     // A simple public domain / test video URL
-    let target_url = "https://hls.strpst.com/records/228796749/2026/07/08/mrg_228796749_436_SBTeSRBUoG6Fyeay_1783492636.mp4";
+    let target_url = "";
 
     println!("---- Phase 1: Synchronous Download Test ---- ");
 
@@ -76,38 +76,79 @@ fn main() {
 }*/
 
 
+use regex::Regex;
 use std::process::Stdio;
+use std::sync::LazyLock;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
+
+
+static PROGRESS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(\d+(?:\.\d+)?)%").expect("Failed to compile regex")
+});
+
 /// The messages our background task will send to the main thread. 
 pub enum DownloadState {
-    Progress(String), // Later we'll change this to f64 percentage
+    Progress(f64), // Later we'll change this to f64 percentage
     Success, 
     Error,
 }
 
 async fn perform_download(url: String, tx: mpsc::Sender<DownloadState>) {
+
+
     let mut child = Command::new("yt-dlp")
         .arg("--js-runtime")
         .arg("node")
         .arg("--force-overwrites")
+        .arg("--newline")
         .arg("-f")
         .arg("bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4]/best")
         .arg("-P")
         .arg("/mnt/e/my_files")
         .arg(&url) // Borrow it here for the command. Why not own? 
+                   // Because, .arg() method expects a type that implements `AsRef<OsStr>`.
+                   // Passing a reference is preferred since the OS needs to read the string to
+                   // build the Os execution request. If you passed an owned `String`, would 
+                   // have a memory overhead. Borrowing is cheaper. 
         .stdout(Stdio::piped())
         .spawn()
         .expect("Failed to execute yt-dlp");
+
+    // Compile the Regex ONCE before the loop
+    // This pattern captures decimals.
+    // Let's create a regex object
+    // let re = Regex::new(r"(\d+(?:\.\d+)?)%").expect("Failed to compile regex");
 
     if let Some(stdout) = child.stdout.take() {
         let mut reader = BufReader::new(stdout).lines();
 
         while let Ok(Some(line)) = reader.next_line().await {
-            // Send the raw text line to the UI
-            let _ = tx.send(DownloadState::Progress(line)).await;
+
+            // Search the line for the regex pattern
+            // if let Some(captures) = re.captures(&line) {
+            // Use the globally compiled regex
+            if let Some(captures) = PROGRESS_RE.captures(&line) {
+                // Extract  the first capture group
+                if let Some(matched) = captures.get(1) {
+                    // Attempt to parse the extracted string into an f64
+                    if let Ok(percentage) = matched.as_str().parse::<f64>() {
+                        // Send the clean f64 to the UI thread
+                        // let _ = tx.send(DownloadState::Progress(percentage)).await;
+                        //
+                        // Handle a dropped receiver (eg. TUI was closed)
+                        if tx.send(DownloadState::Progress(percentage)).await.is_err() {
+                            // The main UUI thread has closed the channel.
+                            // Kill the child process so it doesn't become a zombie
+                            // downloading gigabytes of data in the background
+                            let _ = child.kill().await;
+                            return; // Exit the background task completely
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -122,11 +163,21 @@ async fn perform_download(url: String, tx: mpsc::Sender<DownloadState>) {
 
 #[tokio::main]
 async fn main() {
-    let target_url = "https://tulipvid.net/videos/Bettie_Bondage_Tricking-Your-Best-Friends-Wife_converted.m3u8";
+    let target_url = "https://www.youtube.com/watch?v=rH3zE7VlIMs";
 
     // 1. Create the channel
     let (tx, mut rx) = mpsc::channel::<DownloadState>(32); // Why the number?
+                                                           // It is the channel's(queue buffer) capacity.
                                                            // Why is rx mutable? 
+                                                           // Because reading from a channel 
+                                                           // changes its internal state. Every
+                                                           // time `rx.recv().await` is called
+                                                           // the receiver has to update its 
+                                                           // internal pointers to pull the 
+                                                           // message out of the queue and ensure
+                                                           // you don't read the esame message
+                                                           // twice. In Rust, any method that t
+                                                           // modifies state requires `&mut self`.
 
     println!("----- Phase 2: Refactored Asynchronous Decoupling -----\n");
 
@@ -134,7 +185,11 @@ async fn main() {
     // We clone 'tx' so the background task gets its own copy.
     // The main thread keep the original 'tx'.
     // We also convert the string literal to an owned `String`. Why did we do it? 
+    // Because, tokio requires `'static` lifetime
     tokio::spawn(perform_download(target_url.to_string(), tx.clone())); // why did we clone tx?
+                                                                        // We need multiple back-
+                                                                        // ground task sending 
+                                                                        // data.
 
     // We could do a second download right here!
     // tokio::spawn(perform_download(target_url.to_string(), tx.clone())); // why did we clone tx?
@@ -142,11 +197,13 @@ async fn main() {
     // 3. The Main Thread UI Loop
     while let Some(message) = rx.recv().await {
         match message {
-            DownloadState::Progress(line) => println!("[BACKGROUND] {}", line), 
+            DownloadState::Progress(percent) => println!("[BACKGROUND] {}", percent), 
+
             DownloadState::Success => {
                 println!("\n[MAIN] Download finished!");
                 break;
             }
+
             DownloadState::Error => {
                 println!("\n[MAIN] Download failed!");
                 break;
