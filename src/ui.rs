@@ -26,12 +26,14 @@ pub fn render(f: &mut Frame, app: &App) {
     render_downloads(f, app, chunks[2]);
     render_footer(f, app, chunks[3]);
 
-    if let Some(modal) = &app.detail_modal {
+    if let Some(path_modal) = &app.path_modal {
+        render_path_modal(f, path_modal);
+    } else if let Some(modal) = &app.detail_modal {
         render_modal(f, modal);
     }
 }
 
-/// Renders the top title and mode indicator header.
+/// Renders the top title, scheme/mode indicator, and active download directory header.
 fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let mode_style = match app.input_mode {
         InputMode::Editing => Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
@@ -40,19 +42,39 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
 
     let scheme_style = Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD);
 
+    let mode_str = match app.input_mode {
+        InputMode::Editing => "EDITING",
+        InputMode::Normal => "NORMAL",
+    };
+
+    let (scheme_name, subtitle) = if area.width < 95 {
+        (app.input_scheme.short_name(), " ")
+    } else {
+        (app.input_scheme.name(), " Video Downloader ")
+    };
+
+    // Calculate fixed character overhead:
+    // " VIDOWN " (8) + subtitle + "[Scheme: " (9) + scheme_name + " | Mode: " (9) + mode_str + "] [Dir: " (8) + "]" (1)
+    let fixed_len = 8 + subtitle.len() + 9 + scheme_name.len() + 9 + mode_str.len() + 8 + 1;
+    let available_title_width = (area.width as usize).saturating_sub(4);
+    let max_dir_len = available_title_width.saturating_sub(fixed_len);
+
+    let dir_display = if app.output_dir.chars().count() > max_dir_len {
+        truncate_path_tail(&app.output_dir, max_dir_len)
+    } else {
+        app.output_dir.clone()
+    };
+
     let title_line = Line::from(vec![
         Span::styled(" VIDOWN ", Style::default().fg(Color::White).bg(Color::Blue).add_modifier(Modifier::BOLD)),
-        Span::raw(" Video Downloader "),
+        Span::raw(subtitle),
         Span::styled("[Scheme: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(app.input_scheme.name(), scheme_style),
+        Span::styled(scheme_name, scheme_style),
         Span::styled(" | Mode: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(
-            match app.input_mode {
-                InputMode::Editing => "EDITING",
-                InputMode::Normal => "NORMAL",
-            },
-            mode_style,
-        ),
+        Span::styled(mode_str, mode_style),
+        Span::styled("] ", Style::default().fg(Color::DarkGray)),
+        Span::styled("[Dir: ", Style::default().fg(Color::DarkGray)),
+        Span::styled(dir_display, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
         Span::styled("]", Style::default().fg(Color::DarkGray)),
     ]);
 
@@ -214,12 +236,12 @@ fn render_download_item(f: &mut Frame, item: &crate::app::DownloadItem, is_selec
 fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     let keybindings_help = match app.input_scheme {
         crate::app::InputScheme::StandardModal => match app.input_mode {
-            InputMode::Normal => "[i] Edit  [Enter] Submit  [j/↓] Next  [k/↑] Prev  [e] View Logs  [F2] Vim  [q] Quit",
-            InputMode::Editing => "[Enter] Submit URL  [Esc] Normal Mode  [←/→] Move Cursor  [Backspace] Delete",
+            InputMode::Normal => "[i] Edit  [Enter] Submit  [j/↓] Next  [k/↑] Prev  [e] Logs  [p/F3] Path  [F2] Vim  [q] Quit",
+            InputMode::Editing => "[Enter] Submit  [Esc] Normal  [F3] Path  [←/→] Cursor  [Backspace] Delete",
         },
         crate::app::InputScheme::Vim => match app.input_mode {
-            InputMode::Normal => "[i/a] Insert  [j/k] Select  [x] Del Char  [dd] Clear  [e] Logs  [F2] Modal  [q] Quit",
-            InputMode::Editing => "[Esc] Normal Mode  [Enter] Submit URL  [←/→] Move Cursor",
+            InputMode::Normal => "[i/a] Insert  [j/k] Select  [x] Del  [p/F3] Path  [e] Logs  [F2] Modal  [q] Quit",
+            InputMode::Editing => "[Esc] Normal  [Enter] Submit  [F3] Path  [←/→] Cursor",
         },
     };
 
@@ -252,7 +274,7 @@ fn render_modal(f: &mut Frame, modal: &crate::app::DetailModal) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3), // Info: URL & Status
+            Constraint::Length(4), // Info: URL, Status, Output Dir
             Constraint::Min(4),    // Log content
             Constraint::Length(1), // Close instruction
         ])
@@ -266,6 +288,10 @@ fn render_modal(f: &mut Frame, modal: &crate::app::DetailModal) {
         Line::from(vec![
             Span::styled("Status: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
             Span::raw(&modal.status),
+        ]),
+        Line::from(vec![
+            Span::styled("Directory: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::raw(&modal.output_dir),
         ]),
     ];
     let info_paragraph = Paragraph::new(info_text).wrap(Wrap { trim: true });
@@ -301,6 +327,145 @@ fn render_modal(f: &mut Frame, modal: &crate::app::DetailModal) {
     )))
     .alignment(Alignment::Center);
     f.render_widget(footer_text, chunks[2]);
+}
+
+/// Renders the download directory configuration modal dialog.
+/// Uses a fixed bounded height of at least 9 rows on standard 80x24 terminals.
+fn render_path_modal(f: &mut Frame, modal: &crate::app::PathModal) {
+    let modal_area = centered_rect_bounded(64, 9, f.area());
+    if modal_area.width < 10 || modal_area.height < 5 {
+        return;
+    }
+
+    // Clear underneath the modal to avoid background bleed-through
+    f.render_widget(Clear, modal_area);
+
+    let modal_block = Block::default()
+        .title(" Set Download Directory ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+
+    let inner = modal_block.inner(modal_area);
+    f.render_widget(modal_block, modal_area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1), // Instruction
+            Constraint::Length(3), // Bordered text input field
+            Constraint::Length(1), // Hint
+            Constraint::Length(1), // Action Shortcuts
+            Constraint::Length(1), // Navigation instructions
+        ])
+        .split(inner);
+
+    // 1. Instruction line
+    let instruction = Paragraph::new(Span::styled(
+        "Destination directory for subsequent downloads:",
+        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+    ));
+    f.render_widget(instruction, chunks[0]);
+
+    // 2. Input Box with Border and Horizontal Viewport Scrolling
+    let input_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green))
+        .title(" Directory Path ");
+
+    let input_inner = input_block.inner(chunks[1]);
+    f.render_widget(input_block, chunks[1]);
+
+    let visible_width = input_inner.width as usize;
+    if visible_width > 0 {
+        let cursor_pos = modal.cursor_position;
+        let mut scroll_offset = modal.scroll_offset;
+
+        if cursor_pos < scroll_offset {
+            scroll_offset = cursor_pos;
+        } else if cursor_pos >= scroll_offset + visible_width {
+            scroll_offset = cursor_pos.saturating_sub(visible_width.saturating_sub(1));
+        }
+
+        let visible_text: String = modal.input.chars().skip(scroll_offset).take(visible_width).collect();
+
+        let input_widget = if modal.input.is_empty() {
+            Paragraph::new(Span::styled(
+                "./downloads (default)",
+                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+            ))
+        } else {
+            Paragraph::new(visible_text)
+        };
+        f.render_widget(input_widget, input_inner);
+
+        // Position terminal hardware cursor
+        let cursor_offset = cursor_pos.saturating_sub(scroll_offset);
+        let cursor_screen_x = input_inner.x + (cursor_offset as u16).min(input_inner.width.saturating_sub(1));
+        let cursor_screen_y = input_inner.y;
+        f.set_cursor_position((cursor_screen_x, cursor_screen_y));
+    }
+
+    // 3. Hint
+    let hint = Paragraph::new(Span::styled(
+        "Empty resets to ./downloads. Paths are literal (no ~ expansion).",
+        Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+    ));
+    f.render_widget(hint, chunks[2]);
+
+    // 4. Action Shortcuts
+    let shortcuts = Paragraph::new(Line::from(vec![
+        Span::styled("[Enter] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::raw("Save  "),
+        Span::styled("[Esc] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        Span::raw("Cancel  "),
+        Span::styled("[Ctrl+D] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::raw("Default  "),
+        Span::styled("[Ctrl+U] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::raw("Clear"),
+    ]));
+    f.render_widget(shortcuts, chunks[3]);
+
+    // 5. Navigation Help
+    let nav_help = Paragraph::new(Span::styled(
+        "[←/→] Cursor  [Backspace/Del] Edit  [Home/End] Jump",
+        Style::default().fg(Color::DarkGray),
+    ));
+    f.render_widget(nav_help, chunks[4]);
+}
+
+/// Truncates a file path string from the beginning, keeping the tail and prepending "…"
+/// if it exceeds `max_chars`.
+pub fn truncate_path_tail(path: &str, max_chars: usize) -> String {
+    let char_count = path.chars().count();
+    if char_count <= max_chars {
+        path.to_string()
+    } else if max_chars == 0 {
+        String::new()
+    } else if max_chars == 1 {
+        "…".to_string()
+    } else {
+        let skip_count = char_count.saturating_sub(max_chars.saturating_sub(1));
+        let tail: String = path.chars().skip(skip_count).collect();
+        format!("…{}", tail)
+    }
+}
+
+/// Helper function to generate a centered rect with fixed bounding dimensions,
+/// clamped so it never exceeds the outer area.
+pub fn centered_rect_bounded(width: u16, height: u16, r: Rect) -> Rect {
+    if r.width <= 2 || r.height <= 2 {
+        return Rect::default();
+    }
+    let actual_width = width.min(r.width.saturating_sub(2)).max(1);
+    let actual_height = height.min(r.height.saturating_sub(2)).max(1);
+    let x = r.x + (r.width.saturating_sub(actual_width)) / 2;
+    let y = r.y + (r.height.saturating_sub(actual_height)) / 2;
+    Rect {
+        x,
+        y,
+        width: actual_width,
+        height: actual_height,
+    }
 }
 
 /// Helper function to generate a centered rect of given percentage dimensions.

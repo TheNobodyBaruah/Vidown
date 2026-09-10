@@ -26,7 +26,12 @@ Vidown adheres strictly to the **Model-View-Update (MVU / Elm)** architecture, r
   - Press <kbd>F2</kbd> anytime to toggle between schemes.
 - **Dual Error & Diagnostic Reporting**:
   - Inline status badges in the download list for immediate visibility.
-  - Expandable modal log viewer: press <kbd>e</kbd> on any download to inspect raw `yt-dlp` logs and captured stderr traces.
+  - Expandable modal log viewer: press <kbd>e</kbd> on any download to inspect raw `yt-dlp` logs, destination directory, and captured stderr traces.
+- **Configurable & Persistent Download Directory**:
+  - Set a custom download destination directory via a dedicated modal dialog (<kbd>p</kbd> or <kbd>F3</kbd>).
+  - Automatically creates destination directory upon saving.
+  - Persists configured path across app restarts (`%APPDATA%\vidown\config.toml` on Windows, `~/.config/vidown/config.toml` on Linux/macOS).
+  - Automatically tracks and displays per-item download directory in download details modal.
 - **Safe Terminal Lifecycle**:
   - Uses double-buffering and raw mode via `crossterm`.
   - Installs panic hooks via `color-eyre` ensuring your terminal is cleanly restored even in the event of an abnormal crash.
@@ -320,21 +325,41 @@ Press <kbd>F2</kbd> at any time in Normal mode to toggle between schemes:
 | <kbd>Delete</kbd> | Editing | Delete character under cursor |
 | <kbd>Home</kbd> / <kbd>End</kbd> | Editing | Jump cursor to start / end of URL |
 | <kbd>F2</kbd> | Normal | Toggle between Standard Modal and Vim schemes |
+| <kbd>F3</kbd> | Global | Open / toggle download directory configuration modal |
+| <kbd>p</kbd> | Normal | Open download directory configuration modal |
 | <kbd>j</kbd> / <kbd>↓</kbd> | Normal / Modal | Select next download item / scroll modal down |
 | <kbd>k</kbd> / <kbd>↑</kbd> | Normal / Modal | Select previous download item / scroll modal up |
-| <kbd>e</kbd> | Normal | View logs and stderr traces for selected download |
+| <kbd>e</kbd> | Normal | View logs, destination directory, and stderr traces for selected download |
 | <kbd>0</kbd> / <kbd>$</kbd> | Normal (Vim) | Move cursor to beginning / end of URL input |
 | <kbd>x</kbd> | Normal (Vim) | Delete character under cursor |
 | <kbd>q</kbd> or <kbd>Ctrl</kbd> + <kbd>c</kbd> | Normal | Cleanly restore terminal and exit application |
 
+### Path Configuration Modal Shortcuts:
+| Key | Action |
+|---|---|
+| <kbd>Enter</kbd> | Save and apply destination path (automatically creates directory) |
+| <kbd>Esc</kbd> | Cancel without saving changes |
+| <kbd>Ctrl</kbd> + <kbd>d</kbd> | Reset input buffer to default (`./downloads`) |
+| <kbd>Ctrl</kbd> + <kbd>u</kbd> | Clear input buffer |
+| <kbd>←</kbd> / <kbd>→</kbd> / <kbd>Home</kbd> / <kbd>End</kbd> | Navigate cursor with safe multi-byte UTF-8 indexing |
+| <kbd>Backspace</kbd> / <kbd>Delete</kbd> | Delete character before / under cursor |
+
 ---
 
-## Output Directory
+## Output Directory & Configuration
 
 By default, downloaded media files are saved in the **`downloads/`** subdirectory:
-- Path: `./downloads/%(title)s.%(ext)s`
+- Default Path: `./downloads/%(title)s.%(ext)s`
 
-The target directory is created automatically if it does not already exist.
+### Custom Download Path:
+- Press <kbd>p</kbd> in Normal mode or press <kbd>F3</kbd> anywhere to open the **Set Download Directory** modal.
+- Type or paste your desired path (surrounding quotes are automatically stripped; paths are treated literally without `~` expansion).
+- Leaving the path blank resets to default (`./downloads`).
+- When saving (<kbd>Enter</kbd>), Vidown automatically creates the directory via `create_dir_all`. If creation fails (e.g. permission error), a warning is displayed in the status bar.
+- Your customized path is persisted to the standard user configuration file:
+  - **Windows**: `%APPDATA%\vidown\config.toml`
+  - **Linux / macOS**: `~/.config/vidown/config.toml`
+- On startup, Vidown loads your saved path automatically.
 
 ---
 
@@ -349,14 +374,16 @@ Vidown/
 │   ├── lib.rs               # Library root re-exporting modules
 │   ├── main.rs              # Application entry point & Tokio select! loop
 │   ├── app.rs               # Model: application state, items, and input modes
+│   ├── config.rs            # Persistence: OS user config directory & TOML file manager
 │   ├── ui.rs                # View: pure layout rendering & widgets
 │   ├── events.rs            # Update: event stream, dispatch, and keybindings
 │   ├── downloader.rs        # Domain Layer: yt-dlp & FFmpeg asynchronous execution
 │   └── terminal.rs          # Safe terminal lifecycle and panic recovery
 └── tests/
-    ├── app_tests.rs         # Unit tests for state transitions and key handling
+    ├── app_tests.rs         # Unit tests for state transitions, path modal, and key handling
+    ├── config_tests.rs      # Unit tests for TOML serialization, parsing, and persistence
     ├── downloader_tests.rs  # Unit tests for progress regex & parsing logic
-    └── ui_tests.rs          # Buffer-level and TestBackend integration tests
+    └── ui_tests.rs          # Buffer-level, TestBackend, and 80x24 layout integration tests
 ```
 
 ---

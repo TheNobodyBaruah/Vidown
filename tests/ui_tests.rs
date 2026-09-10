@@ -126,3 +126,169 @@ fn test_interactive_session_with_test_backend() {
     handle_key_event(&mut app, key(KeyCode::Char('q')));
     assert!(app.should_quit);
 }
+
+#[test]
+fn test_render_header_adaptive_truncation_under_95_cols() {
+    let mut app = App::new();
+    app.output_dir = "./downloads".to_string();
+
+    // 1. Standard 80x24 terminal
+    let backend_80 = TestBackend::new(80, 24);
+    let mut terminal_80 = Terminal::new(backend_80).unwrap();
+    terminal_80.draw(|f| ui::render(f, &app)).unwrap();
+    let text_80 = buffer_to_string(terminal_80.backend().buffer());
+
+    assert!(text_80.contains("VIDOWN"), "Header must have title");
+    assert!(text_80.contains("[Dir: ./downloads]"), "80-col header should display active dir");
+
+    // 2. Long path on 80-column terminal triggers adaptive truncation with '…'
+    app.output_dir = "C:\\Users\\Hp\\Very\\Long\\Path\\To\\Custom\\DownloadsFolder".to_string();
+    let backend_80_long = TestBackend::new(80, 24);
+    let mut terminal_80_long = Terminal::new(backend_80_long).unwrap();
+    terminal_80_long.draw(|f| ui::render(f, &app)).unwrap();
+    let text_80_long = buffer_to_string(terminal_80_long.backend().buffer());
+
+    assert!(text_80_long.contains("[Dir: …"), "Long dir must be adaptively truncated with …");
+    assert!(text_80_long.contains("DownloadsFolder]"), "Truncation must retain the tail");
+
+    // 3. Narrow 70x24 terminal
+    let backend_70 = TestBackend::new(70, 24);
+    let mut terminal_70 = Terminal::new(backend_70).unwrap();
+    terminal_70.draw(|f| ui::render(f, &app)).unwrap();
+    let text_70 = buffer_to_string(terminal_70.backend().buffer());
+    assert!(text_70.contains("VIDOWN"), "Narrow terminal must render without panicking");
+}
+
+#[test]
+fn test_render_path_modal_on_80x24_terminal() {
+    let mut app = App::new();
+    app.open_path_modal();
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ui::render(f, &app)).unwrap();
+
+    let screen = buffer_to_string(terminal.backend().buffer());
+
+    // Verify modal elements are rendered without collapsing
+    assert!(screen.contains("Set Download Directory"), "Must contain modal title");
+    assert!(screen.contains("Destination directory"), "Must contain instructions");
+    assert!(screen.contains("Directory Path"), "Must contain input box title");
+    assert!(screen.contains("./downloads"), "Must contain current path");
+    assert!(screen.contains("Empty resets to ./downloads"), "Must contain hint");
+    assert!(screen.contains("[Enter] Save"), "Must contain Save shortcut");
+    assert!(screen.contains("[Esc] Cancel"), "Must contain Cancel shortcut");
+    assert!(screen.contains("[Ctrl+D] Default"), "Must contain Default shortcut");
+    assert!(screen.contains("[Ctrl+U] Clear"), "Must contain Clear shortcut");
+    assert!(screen.contains("[←/→] Cursor"), "Must contain Navigation help");
+}
+
+#[test]
+fn test_render_path_modal_horizontal_viewport_scrolling() {
+    let mut app = App::new();
+    app.open_path_modal();
+
+    // Set a very long path
+    let long_path = "C:\\VeryLongPath\\ThatExceedsTheWidthOfTheModalInputBox\\Subfolder\\Target";
+    let modal = app.path_modal.as_mut().unwrap();
+    modal.input = long_path.to_string();
+    modal.cursor_position = modal.input.chars().count(); // cursor at end
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ui::render(f, &app)).unwrap();
+
+    let screen = buffer_to_string(terminal.backend().buffer());
+    // Since cursor is at the end, horizontal scroll must show the tail "Target"
+    assert!(screen.contains("Target"), "Horizontal scroll must render tail when cursor is at end");
+}
+
+#[test]
+fn test_footer_displays_path_shortcuts() {
+    let mut app = App::new();
+    app.status_message = None; // clear greeting so keybindings help renders
+
+    // Normal mode: StandardModal
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ui::render(f, &app)).unwrap();
+    let screen = buffer_to_string(terminal.backend().buffer());
+    assert!(screen.contains("[p/F3] Path"), "Normal footer must show [p/F3] Path hint");
+
+    // Editing mode
+    app.input_mode = InputMode::Editing;
+    terminal.draw(|f| ui::render(f, &app)).unwrap();
+    let screen_edit = buffer_to_string(terminal.backend().buffer());
+    assert!(screen_edit.contains("[F3] Path"), "Editing footer must show [F3] Path hint");
+}
+
+#[test]
+fn test_render_detail_modal_displays_output_dir() {
+    let mut app = App::new();
+    app.output_dir = "/custom/media/path".to_string();
+    let id = app.enqueue_download("https://mysite.com/video.mp4".to_string());
+    app.append_log(id, "Starting stream...".to_string());
+    app.open_selected_details();
+
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ui::render(f, &app)).unwrap();
+
+    let screen = buffer_to_string(terminal.backend().buffer());
+    assert!(screen.contains("Directory: "), "Detail modal must have Directory label");
+    assert!(screen.contains("/custom/media/path"), "Detail modal must show output dir");
+}
+
+#[test]
+fn test_centered_rect_bounded_micro_terminals() {
+    use ratatui::layout::Rect;
+    use video_downloader::ui::centered_rect_bounded;
+
+    // Zero / degenerate dimensions return default Rect (0x0)
+    assert_eq!(centered_rect_bounded(64, 9, Rect::new(0, 0, 0, 0)), Rect::default());
+    assert_eq!(centered_rect_bounded(64, 9, Rect::new(0, 0, 2, 2)), Rect::default());
+    assert_eq!(centered_rect_bounded(64, 9, Rect::new(0, 0, 1, 10)), Rect::default());
+
+    // Small dimensions clamp bounded size safely
+    let rect_small = centered_rect_bounded(64, 9, Rect::new(0, 0, 20, 10));
+    assert!(rect_small.width <= 20);
+    assert!(rect_small.height <= 10);
+
+    // Standard 80x24 terminal gets exact 64x9
+    let rect_std = centered_rect_bounded(64, 9, Rect::new(0, 0, 80, 24));
+    assert_eq!(rect_std.width, 64);
+    assert_eq!(rect_std.height, 9);
+}
+
+#[test]
+fn test_render_path_modal_micro_terminal_no_panic() {
+    let mut app = App::new();
+    app.open_path_modal();
+
+    // 10x4 micro terminal
+    let backend_micro = TestBackend::new(10, 4);
+    let mut terminal_micro = Terminal::new(backend_micro).unwrap();
+    let result = terminal_micro.draw(|f| ui::render(f, &app));
+    assert!(result.is_ok(), "Rendering on micro terminal must not panic");
+
+    // 20x8 terminal
+    let backend_small = TestBackend::new(20, 8);
+    let mut terminal_small = Terminal::new(backend_small).unwrap();
+    let result2 = terminal_small.draw(|f| ui::render(f, &app));
+    assert!(result2.is_ok(), "Rendering on small terminal must not panic");
+}
+
+#[test]
+fn test_render_path_modal_empty_input_placeholder() {
+    let mut app = App::new();
+    app.open_path_modal();
+    app.path_modal.as_mut().unwrap().input.clear();
+
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ui::render(f, &app)).unwrap();
+
+    let screen = buffer_to_string(terminal.backend().buffer());
+    assert!(screen.contains("./downloads (default)"), "Empty input must display default placeholder");
+}
+

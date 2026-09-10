@@ -81,13 +81,15 @@ Vidown/
 ├── src/
 │   ├── lib.rs               # Library root re-exporting modules for binary & integration tests
 │   ├── main.rs              # Tokio runtime entry point, terminal init, and event loop
-│   ├── app.rs               # The Model: App struct, DownloadItem, ItemStatus, input modes
+│   ├── app.rs               # The Model: App struct, DownloadItem, PathModal, input modes
+│   ├── config.rs            # Persistence: User config directory & TOML file serializer/parser
 │   ├── ui.rs                # The View: Ratatui layout, Gauge rendering, and modal overlays
 │   ├── events.rs            # The Update: Key event dispatcher, Modal & Vim keybinding schemes
 │   ├── downloader.rs        # Domain Layer: Asynchronous yt-dlp & FFmpeg process manager
 │   └── terminal.rs          # Low-level terminal setup, raw mode, and panic recovery hooks
 └── tests/
-    ├── app_tests.rs         # Unit tests for state transitions, Vim keys, and modal scrolling
+    ├── app_tests.rs         # Unit tests for state transitions, path modal, and key handling
+    ├── config_tests.rs      # Unit tests for TOML serialization, escaping, and persistence
     ├── downloader_tests.rs  # Unit tests for yt-dlp stdout progress parsing regex
     └── ui_tests.rs          # Headless Buffer rendering tests & TestBackend simulation
 ```

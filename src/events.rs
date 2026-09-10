@@ -37,6 +37,18 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> Option<(usize, String)>
         return None;
     }
 
+    // Global toggle for download directory modal (F3) - works in Normal and Editing modes
+    if key.code == KeyCode::F(3) {
+        app.toggle_path_modal();
+        return None;
+    }
+
+    // If path modal dialog is currently open, handle modal editing/dismissal
+    if app.path_modal.is_some() {
+        handle_path_modal_key(app, key);
+        return None;
+    }
+
     // If modal dialog is currently open, handle modal dismissal or scrolling
     if app.detail_modal.is_some() {
         match key.code {
@@ -144,6 +156,10 @@ fn handle_normal_key(app: &mut App, key: KeyEvent) -> Option<(usize, String)> {
                 app.open_selected_details();
                 None
             }
+            KeyCode::Char('p') => {
+                app.open_path_modal();
+                None
+            }
             _ => None,
         },
         InputScheme::Vim => match key.code {
@@ -188,7 +204,76 @@ fn handle_normal_key(app: &mut App, key: KeyEvent) -> Option<(usize, String)> {
                 app.open_selected_details();
                 None
             }
+            KeyCode::Char('p') => {
+                app.open_path_modal();
+                None
+            }
             _ => None,
         },
+    }
+}
+
+/// Handles keys when the download path configuration modal is open.
+fn handle_path_modal_key(app: &mut App, key: KeyEvent) {
+    if key.modifiers.contains(KeyModifiers::CONTROL) {
+        match key.code {
+            KeyCode::Char('d') | KeyCode::Char('D') => {
+                if let Some(modal) = &mut app.path_modal {
+                    modal.reset_default();
+                }
+            }
+            KeyCode::Char('u') | KeyCode::Char('U') => {
+                if let Some(modal) = &mut app.path_modal {
+                    modal.clear();
+                }
+            }
+            _ => {}
+        }
+        return;
+    }
+
+    match key.code {
+        KeyCode::Enter => {
+            app.commit_path_modal();
+        }
+        KeyCode::Esc => {
+            app.cancel_path_modal();
+        }
+        KeyCode::Left => {
+            if let Some(modal) = &mut app.path_modal {
+                modal.move_left();
+            }
+        }
+        KeyCode::Right => {
+            if let Some(modal) = &mut app.path_modal {
+                modal.move_right();
+            }
+        }
+        KeyCode::Home => {
+            if let Some(modal) = &mut app.path_modal {
+                modal.move_home();
+            }
+        }
+        KeyCode::End => {
+            if let Some(modal) = &mut app.path_modal {
+                modal.move_end();
+            }
+        }
+        KeyCode::Backspace => {
+            if let Some(modal) = &mut app.path_modal {
+                modal.backspace();
+            }
+        }
+        KeyCode::Delete => {
+            if let Some(modal) = &mut app.path_modal {
+                modal.delete();
+            }
+        }
+        KeyCode::Char(c) => {
+            if let Some(modal) = &mut app.path_modal {
+                modal.insert_char(c);
+            }
+        }
+        _ => {}
     }
 }
