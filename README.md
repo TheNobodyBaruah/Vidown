@@ -1,5 +1,9 @@
 # Vidown
 
+<p align="center">
+  <img src="assets/VIDOWN.jpeg" alt="Vidown Logo width="500">
+</p>
+
 > **An Asynchronous Terminal-Based Video Downloader in Rust**
 
 Vidown is a fast, robust, and responsive Terminal User Interface (TUI) video downloader built in Rust. It pairs the power of [`ratatui`](https://github.com/ratatui/ratatui) and [`tokio`](https://tokio.rs/) with the media extraction capabilities of [`yt-dlp`](https://github.com/yt-dlp/yt-dlp) and [`ffmpeg`](https://ffmpeg.org/).
