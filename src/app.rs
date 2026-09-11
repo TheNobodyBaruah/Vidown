@@ -316,19 +316,36 @@ pub struct App {
     pub status_message: Option<String>,
 }
 
+/// Determines if the current process is running in an automated test environment.
+fn is_test_environment() -> bool {
+    if cfg!(test) {
+        return true;
+    }
+    if std::env::var("VIDOWN_NO_PERSIST").is_ok() {
+        return true;
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        let exe_str = exe.to_string_lossy();
+        if exe_str.contains("/deps/") || exe_str.contains("\\deps\\") {
+            return true;
+        }
+    }
+    false
+}
+
 impl App {
     pub fn new() -> Self {
         let initial_dir = crate::config::load_config()
             .map(|p| sanitize_path(&p))
             .unwrap_or_else(|| "./downloads".to_string());
         let history_limit = crate::config::load_history_limit();
-        let persist_history = std::env::var("VIDOWN_NO_PERSIST").is_err();
-        let mut history = if persist_history {
-            crate::history::load_history()
+        let (persist_history, history) = if is_test_environment() {
+            (false, Vec::new())
         } else {
-            Vec::new()
+            let mut hist = crate::history::load_history();
+            crate::history::prune_history(&mut hist, history_limit);
+            (true, hist)
         };
-        crate::history::prune_history(&mut history, history_limit);
         Self {
             input_buffer: String::new(),
             cursor_position: 0,
@@ -698,7 +715,9 @@ impl App {
                 }
             }
             self.output_dir = clean_path.clone();
-            let _ = crate::config::save_config(&clean_path);
+            if !is_test_environment() {
+                let _ = crate::config::save_config(&clean_path);
+            }
         }
     }
 
