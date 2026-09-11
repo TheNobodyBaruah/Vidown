@@ -49,11 +49,11 @@ Vidown adheres strictly to the **Model-View-Update (MVU / Elm)** architecture, r
 
 ## Prerequisites
 
-Vidown is designed to be **self-sufficient**. You only need the standard Rust toolchain to compile:
+Vidown is designed to be **self-sufficient**. If you install via our automated installer or download pre-compiled releases, **no development tools or runtimes are required**.
 
 | Tool | Purpose | Automatic Setup |
 |---|---|---|
-| **Rust & Cargo** (1.80+) | Compilation & runtime execution | Required manually |
+| **Rust & Cargo** (1.80+) | Only required when compiling from source | Optional (Pre-built binaries provided) |
 | **yt-dlp** | Core media extraction & API resolution | **Auto-downloaded if missing** |
 | **FFmpeg & FFprobe** | Audio/video stream multiplexing | **Auto-downloaded if missing** |
 | **Node.js** | JS runtime for YouTube n-sig extraction | **Auto-downloaded if missing** |
@@ -64,33 +64,87 @@ Vidown is designed to be **self-sufficient**. You only need the standard Rust to
 
 ## Installation & Setup
 
-### 1. Clone the Repository
+### Quick Install (Recommended)
+
+Install Vidown system-wide with a single command without needing Rust or Cargo:
+
+#### Linux & WSL
+Open your terminal and run:
+```bash
+curl -fsSL https://raw.githubusercontent.com/TheNobodyBaruah/Vidown/main/scripts/install.sh | sudo bash
+```
+> This downloads the latest `linux-x86_64` release, installs the executable to `/usr/local/bin/vidown`, and creates a `/usr/local/bin/Vidown` symlink.
+
+#### Windows
+Open PowerShell as **Administrator** and run:
+```powershell
+irm https://raw.githubusercontent.com/TheNobodyBaruah/Vidown/main/scripts/install.ps1 | iex
+```
+> This downloads the latest `windows-x86_64` release, installs the executable to `C:\Program Files\Vidown\bin`, and adds it to your Machine `PATH`.
+
+Once installed, you can launch Vidown from any directory simply by typing:
+```bash
+Vidown
+```
+*(or `vidown`)*
+
+---
+
+### Uninstallation
+
+To remove Vidown and clean up system PATH entries:
+
+- **Linux & WSL**:
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/TheNobodyBaruah/Vidown/main/scripts/install.sh | sudo bash -s -- --uninstall
+  ```
+  *(Or if you have the repository cloned: `sudo ./scripts/install.sh --uninstall`)*
+
+- **Windows** (PowerShell as Administrator):
+  ```powershell
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/TheNobodyBaruah/Vidown/main/scripts/install.ps1))) -Uninstall
+  ```
+  *(Or if you have the repository cloned: `powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Uninstall`)*
+
+---
+
+### Install from Source (Rust Developers)
+
+If you prefer building directly from the Rust source code:
+
+#### 1. Clone the Repository
 ```bash
 git clone https://github.com/TheNobodyBaruah/Vidown.git
 cd Vidown
 ```
 
-### 2. Build the Application
+#### 2. Build the Application
 Compile the optimized release binary:
 ```bash
 cargo build --release
 ```
-The compiled binary will be located at `target/release/video_downloader`.
+The compiled binary will be located at `target/release/vidown` (or `target/release/vidown.exe` on Windows).
 
-### 3. Run the Automated Tests
-Verify that all 104 unit and integration tests pass:
+#### 3. Run the Automated Tests
+Verify that all unit and integration tests pass:
 ```bash
 cargo test
 ```
 
-### 4. (Optional) Install System-Wide Command
+#### 4. (Optional) Install System-Wide Command
 To launch Vidown simply by typing `Vidown` in your terminal from any directory:
 
+**On Linux / WSL:**
 ```bash
-# On Linux / WSL:
-sudo cp target/release/video_downloader /usr/local/bin/Vidown
-sudo ln -sf /usr/local/bin/Vidown /usr/local/bin/vidown
+sudo cp target/release/vidown /usr/local/bin/vidown
+sudo ln -sf /usr/local/bin/vidown /usr/local/bin/Vidown
 ```
+
+**On Windows (PowerShell as Administrator):**
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
+```
+*(Or manually copy `target\release\vidown.exe` to `C:\Program Files\Vidown\bin\` and add to PATH)*
 
 Now you can start the application anytime with:
 ```bash
@@ -230,6 +284,12 @@ By default, downloaded media files are saved in the **`downloads/`** subdirector
 
 ```text
 Vidown/
+├── .github/
+│   └── workflows/
+│       └── release.yml      # Automated multi-platform GitHub Releases CI/CD
+├── scripts/
+│   ├── install.sh           # Linux & WSL one-line automated installer / uninstaller
+│   └── install.ps1          # Windows PowerShell one-line automated installer / uninstaller
 ├── Cargo.toml               # Project dependencies and metadata
 ├── PLAN.md                  # Comprehensive architectural specification
 ├── README.md                # Documentation and user guide
