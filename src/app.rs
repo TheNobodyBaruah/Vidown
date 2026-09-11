@@ -80,8 +80,120 @@ impl DownloadItem {
     }
 }
 
+use crate::deps::{RequiredTool, SetupEvent, ToolLocation, ToolSetupStatus};
 use crate::history::{HistoryEntry, open_in_file_manager};
 use std::cell::Cell;
+
+/// Represents the active high-level screen of the application.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurrentScreen {
+    Main,
+    Setup,
+}
+
+/// Represents the overall progress phase of the initial dependency setup.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SetupPhase {
+    Checking,
+    Downloading,
+    Complete,
+    Error(String),
+}
+
+/// Information and status for a required external dependency shown during setup.
+#[derive(Debug, Clone)]
+pub struct SetupToolItem {
+    pub id: &'static str,
+    pub display_name: &'static str,
+    pub status: ToolSetupStatus,
+}
+
+/// State tracking the initial tool setup and onboarding screen.
+#[derive(Debug, Clone)]
+pub struct SetupState {
+    pub phase: SetupPhase,
+    pub tools: Vec<SetupToolItem>,
+    pub status_message: String,
+    pub help_scroll: usize,
+}
+
+impl SetupState {
+    pub fn new(tools: Vec<(RequiredTool, ToolLocation)>) -> Self {
+        let mut tool_items = Vec::new();
+        let mut has_missing = false;
+
+        for (tool, loc) in tools {
+            let status = match loc {
+                ToolLocation::SystemPath(p) => {
+                    ToolSetupStatus::Found(format!("Found in PATH ({})", p.display()))
+                }
+                ToolLocation::LocalBin(p) => {
+                    ToolSetupStatus::Found(format!("Found in local bin ({})", p.display()))
+                }
+                ToolLocation::Missing => {
+                    has_missing = true;
+                    ToolSetupStatus::PendingDownload
+                }
+            };
+            tool_items.push(SetupToolItem {
+                id: tool.id(),
+                display_name: tool.display_name(),
+                status,
+            });
+        }
+
+        let phase = if has_missing {
+            SetupPhase::Downloading
+        } else {
+            SetupPhase::Complete
+        };
+
+        Self {
+            phase,
+            tools: tool_items,
+            status_message: "Checking dependencies...".to_string(),
+            help_scroll: 0,
+        }
+    }
+}
+
+/// Information and state for the persistent How to Use / Keybinding Guide modal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HelpModal {
+    pub scroll_offset: usize,
+}
+
+impl HelpModal {
+    pub fn new() -> Self {
+        Self { scroll_offset: 0 }
+    }
+
+    pub fn scroll_down(&mut self, max_lines: usize) {
+        if self.scroll_offset + 1 < max_lines {
+            self.scroll_offset += 1;
+        }
+    }
+
+    pub fn scroll_up(&mut self) {
+        if self.scroll_offset > 0 {
+            self.scroll_offset -= 1;
+        }
+    }
+
+    pub fn page_down(&mut self, max_lines: usize, delta: usize) {
+        self.scroll_offset = (self.scroll_offset + delta).min(max_lines.saturating_sub(1));
+    }
+
+    pub fn page_up(&mut self, delta: usize) {
+        self.scroll_offset = self.scroll_offset.saturating_sub(delta);
+    }
+}
+
+impl Default for HelpModal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 /// Information displayed in the full detail / error modal.
 #[derive(Debug, Clone)]
@@ -314,6 +426,14 @@ pub struct App {
     pub should_quit: bool,
     /// Global notification message shown in the status bar (with timestamp or expiry).
     pub status_message: Option<String>,
+    /// Active high-level screen (Main vs Setup).
+    pub current_screen: CurrentScreen,
+    /// Setup and onboarding state when external dependencies are being checked or installed.
+    pub setup_state: Option<SetupState>,
+    /// Optional persistent How to Use / Keybinding Guide modal.
+    pub help_modal: Option<HelpModal>,
+    /// Flag indicating the user requested to retry failed dependency downloads.
+    pub needs_setup_retry: bool,
 }
 
 /// Determines if the current process is running in an automated test environment.
@@ -346,6 +466,20 @@ impl App {
             crate::history::prune_history(&mut hist, history_limit);
             (true, hist)
         };
+
+        let (current_screen, setup_state) = if is_test_environment()
+            && std::env::var("VIDOWN_TEST_DEPS").is_err()
+        {
+            (CurrentScreen::Main, None)
+        } else {
+            let (all_ok, tools) = crate::deps::check_all_dependencies();
+            if all_ok {
+                (CurrentScreen::Main, None)
+            } else {
+                (CurrentScreen::Setup, Some(SetupState::new(tools)))
+            }
+        };
+
         Self {
             input_buffer: String::new(),
             cursor_position: 0,
@@ -363,7 +497,11 @@ impl App {
             persist_history,
             history_path: None,
             should_quit: false,
-            status_message: Some("Ready. Press [i] to enter URL, [p/F3] to set directory, [g/F4] for history, [F2] for Vim, [q] to quit.".to_string()),
+            status_message: Some("Ready. Press [i] to enter URL, [p/F3] to set directory, [g/F4] for history, [?/F1] for Help, [F2] for Vim, [q] to quit.".to_string()),
+            current_screen,
+            setup_state,
+            help_modal: None,
+            needs_setup_retry: false,
         }
     }
 
@@ -387,7 +525,19 @@ impl App {
             history_path: None,
             should_quit: false,
             status_message: None,
+            current_screen: CurrentScreen::Main,
+            setup_state: None,
+            help_modal: None,
+            needs_setup_retry: false,
         }
+    }
+
+    /// Creates an App instance initialized in the Setup screen with explicit setup state (for testing).
+    pub fn new_with_setup(setup_state: SetupState) -> Self {
+        let mut app = Self::new_empty();
+        app.current_screen = CurrentScreen::Setup;
+        app.setup_state = Some(setup_state);
+        app
     }
 
     /// Persists the current history entries to disk if persistence is enabled.
@@ -607,6 +757,7 @@ impl App {
     pub fn open_history_modal(&mut self) {
         self.detail_modal = None;
         self.path_modal = None;
+        self.help_modal = None;
         self.history_modal = Some(HistoryModal::new());
     }
 
@@ -662,7 +813,7 @@ impl App {
 
     /// Open detailed log/error modal for the currently selected item.
     pub fn open_selected_details(&mut self) {
-        if self.path_modal.is_some() || self.history_modal.is_some() {
+        if self.path_modal.is_some() || self.history_modal.is_some() || self.help_modal.is_some() {
             return;
         }
         if let Some(item) = self.downloads.get(self.selected_download) {
@@ -679,10 +830,11 @@ impl App {
         }
     }
 
-    /// Opens the download path configuration modal, enforcing mutual exclusion with detail_modal and history_modal.
+    /// Opens the download path configuration modal, enforcing mutual exclusion with other modals.
     pub fn open_path_modal(&mut self) {
         self.detail_modal = None;
         self.history_modal = None;
+        self.help_modal = None;
         self.path_modal = Some(PathModal::new(&self.output_dir));
     }
 
@@ -726,11 +878,109 @@ impl App {
         self.path_modal = None;
     }
 
+    /// Opens the persistent help guide modal, enforcing mutual exclusion with other modals.
+    pub fn open_help_modal(&mut self) {
+        self.detail_modal = None;
+        self.path_modal = None;
+        self.history_modal = None;
+        self.help_modal = Some(HelpModal::new());
+    }
+
+    /// Closes the persistent help guide modal.
+    pub fn close_help_modal(&mut self) {
+        self.help_modal = None;
+    }
+
+    /// Toggles the persistent help guide modal open/closed.
+    pub fn toggle_help_modal(&mut self) {
+        if self.help_modal.is_some() {
+            self.close_help_modal();
+        } else {
+            self.open_help_modal();
+        }
+    }
+
+    /// Transitions from the setup/onboarding screen into the main application.
+    pub fn finish_setup(&mut self) {
+        self.current_screen = CurrentScreen::Main;
+        self.status_message = Some("Ready. Press [i] to enter URL, [p/F3] for path, [g/F4] for history, [?/F1] for help, [q] to quit.".to_string());
+    }
+
+    /// Triggers a retry of failed dependency downloads on the setup screen.
+    pub fn retry_setup(&mut self) {
+        if let Some(setup) = &mut self.setup_state {
+            for tool in &mut setup.tools {
+                if matches!(tool.status, ToolSetupStatus::Failed(_)) {
+                    tool.status = ToolSetupStatus::PendingDownload;
+                }
+            }
+            setup.phase = SetupPhase::Downloading;
+            setup.status_message = "Retrying dependency downloads...".to_string();
+            self.needs_setup_retry = true;
+        }
+    }
+
+    /// Takes the setup retry request flag, resetting it to false.
+    pub fn take_setup_retry(&mut self) -> bool {
+        let retry = self.needs_setup_retry;
+        self.needs_setup_retry = false;
+        retry
+    }
+
+    /// Scrolls down the setup screen guide.
+    pub fn setup_scroll_down(&mut self) {
+        if let Some(setup) = &mut self.setup_state {
+            setup.help_scroll = setup.help_scroll.saturating_add(1);
+        }
+    }
+
+    /// Scrolls up the setup screen guide.
+    pub fn setup_scroll_up(&mut self) {
+        if let Some(setup) = &mut self.setup_state {
+            setup.help_scroll = setup.help_scroll.saturating_sub(1);
+        }
+    }
+
+    /// Processes a setup event emitted by the background dependency installer.
+    pub fn handle_setup_event(&mut self, event: SetupEvent) {
+        let setup = match &mut self.setup_state {
+            Some(s) => s,
+            None => return,
+        };
+
+        match event {
+            SetupEvent::ToolStatus { tool, status } => {
+                if let Some(item) = setup.tools.iter_mut().find(|t| t.id == tool) {
+                    item.status = status;
+                }
+            }
+            SetupEvent::Progress { tool, percent } => {
+                if let Some(item) = setup.tools.iter_mut().find(|t| t.id == tool) {
+                    item.status = ToolSetupStatus::Downloading { percent };
+                }
+            }
+            SetupEvent::Complete => {
+                setup.phase = SetupPhase::Complete;
+                setup.status_message =
+                    "All dependencies installed successfully! Press [Enter] to continue."
+                        .to_string();
+            }
+            SetupEvent::Error { tool, error } => {
+                if let Some(item) = setup.tools.iter_mut().find(|t| t.id == tool) {
+                    item.status = ToolSetupStatus::Failed(error.clone());
+                }
+                setup.phase = SetupPhase::Error(format!("Failed to set up {}: {}", tool, error));
+                setup.status_message = format!("Setup error on {}: {}", tool, error);
+            }
+        }
+    }
+
     /// Close any open modal dialog.
     pub fn close_modal(&mut self) {
         self.detail_modal = None;
         self.path_modal = None;
         self.history_modal = None;
+        self.help_modal = None;
     }
 }
 

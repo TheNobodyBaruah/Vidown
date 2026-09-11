@@ -37,6 +37,18 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> Option<(usize, String)>
         return None;
     }
 
+    // If on Setup screen, handle setup-specific keys
+    if app.current_screen == crate::app::CurrentScreen::Setup {
+        handle_setup_screen_key(app, key);
+        return None;
+    }
+
+    // Global toggle for persistent help guide modal (F1) - works in Normal and Editing modes
+    if key.code == KeyCode::F(1) {
+        app.toggle_help_modal();
+        return None;
+    }
+
     // Global toggle for history modal (F4) - works in Normal and Editing modes
     if key.code == KeyCode::F(4) {
         app.toggle_history_modal();
@@ -46,6 +58,12 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> Option<(usize, String)>
     // Global toggle for download directory modal (F3) - works in Normal and Editing modes
     if key.code == KeyCode::F(3) {
         app.toggle_path_modal();
+        return None;
+    }
+
+    // If help modal is currently open, handle help modal keys
+    if app.help_modal.is_some() {
+        handle_help_modal_key(app, key);
         return None;
     }
 
@@ -175,6 +193,10 @@ fn handle_normal_key(app: &mut App, key: KeyEvent) -> Option<(usize, String)> {
                 app.open_history_modal();
                 None
             }
+            KeyCode::Char('?') => {
+                app.open_help_modal();
+                None
+            }
             _ => None,
         },
         InputScheme::Vim => match key.code {
@@ -225,6 +247,10 @@ fn handle_normal_key(app: &mut App, key: KeyEvent) -> Option<(usize, String)> {
             }
             KeyCode::Char('g') | KeyCode::Char('G') => {
                 app.open_history_modal();
+                None
+            }
+            KeyCode::Char('?') => {
+                app.open_help_modal();
                 None
             }
             _ => None,
@@ -349,6 +375,109 @@ fn handle_path_modal_key(app: &mut App, key: KeyEvent) {
         KeyCode::Char(c) => {
             if let Some(modal) = &mut app.path_modal {
                 modal.insert_char(c);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Handles keys when the application is on the dependency setup / onboarding screen.
+fn handle_setup_screen_key(app: &mut App, key: KeyEvent) {
+    let phase = app.setup_state.as_ref().map(|s| s.phase.clone());
+    match phase {
+        Some(crate::app::SetupPhase::Complete) => {
+            if key.code == KeyCode::Enter {
+                app.finish_setup();
+                return;
+            }
+        }
+        Some(crate::app::SetupPhase::Error(_)) => {
+            match key.code {
+                KeyCode::Char('r') | KeyCode::Char('R') => {
+                    app.retry_setup();
+                    return;
+                }
+                KeyCode::Char('c') | KeyCode::Char('C') => {
+                    app.finish_setup();
+                    return;
+                }
+                KeyCode::Char('q') | KeyCode::Char('Q') => {
+                    app.should_quit = true;
+                    return;
+                }
+                _ => {}
+            }
+        }
+        _ => {
+            // While downloading/checking, user can still press 'q' to quit
+            if key.code == KeyCode::Char('q') || key.code == KeyCode::Char('Q') {
+                app.should_quit = true;
+                return;
+            }
+        }
+    }
+
+    // Scroll the help/guide on the setup screen
+    match key.code {
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
+            app.setup_scroll_down();
+        }
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
+            app.setup_scroll_up();
+        }
+        KeyCode::PageDown => {
+            if let Some(s) = &mut app.setup_state {
+                s.help_scroll = s.help_scroll.saturating_add(5);
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(s) = &mut app.setup_state {
+                s.help_scroll = s.help_scroll.saturating_sub(5);
+            }
+        }
+        KeyCode::Home => {
+            if let Some(s) = &mut app.setup_state {
+                s.help_scroll = 0;
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Handles keys when the persistent help guide modal is open.
+fn handle_help_modal_key(app: &mut App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc
+        | KeyCode::Enter
+        | KeyCode::Char('q')
+        | KeyCode::Char('Q')
+        | KeyCode::Char('?')
+        | KeyCode::F(1) => {
+            app.close_help_modal();
+        }
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
+            if let Some(m) = &mut app.help_modal {
+                m.scroll_down(100);
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
+            if let Some(m) = &mut app.help_modal {
+                m.scroll_up();
+            }
+        }
+        KeyCode::PageDown => {
+            if let Some(m) = &mut app.help_modal {
+                m.page_down(100, 5);
+            }
+        }
+        KeyCode::PageUp => {
+            if let Some(m) = &mut app.help_modal {
+                m.page_up(5);
+            }
+        }
+        KeyCode::Home => {
+            if let Some(m) = &mut app.help_modal {
+                m.scroll_offset = 0;
             }
         }
         _ => {}

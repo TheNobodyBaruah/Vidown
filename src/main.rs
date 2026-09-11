@@ -23,6 +23,14 @@ async fn main() -> Result<()> {
     // MPSC channel for background download tasks to communicate with UI
     let (tx, mut rx) = mpsc::channel::<DownloadEvent>(128);
 
+    // MPSC channel for background dependency setup worker to communicate with UI
+    let (setup_tx, mut setup_rx) = mpsc::channel::<video_downloader::deps::SetupEvent>(32);
+
+    // If initial dependencies need to be installed, spawn background setup task
+    if app.current_screen == video_downloader::app::CurrentScreen::Setup {
+        video_downloader::deps::spawn_setup_task(setup_tx.clone());
+    }
+
     // Asynchronous crossterm event stream for user keyboard/terminal events
     let mut event_reader = EventStream::new();
 
@@ -49,6 +57,9 @@ async fn main() -> Result<()> {
                             let output_dir = PathBuf::from(&app.output_dir);
                             tokio::spawn(downloader::perform_download(id, url, output_dir, task_tx));
                         }
+                        if app.take_setup_retry() {
+                            video_downloader::deps::spawn_setup_task(setup_tx.clone());
+                        }
                     }
                     Ok(crossterm::event::Event::Resize(..)) => {
                         // Terminal resize automatically redrawn on next tick/loop
@@ -57,7 +68,12 @@ async fn main() -> Result<()> {
                 }
             }
 
-            // Branch 2: Asynchronous events from background download tasks
+            // Branch 2: Asynchronous events from background dependency setup worker
+            Some(setup_event) = setup_rx.recv() => {
+                app.handle_setup_event(setup_event);
+            }
+
+            // Branch 3: Asynchronous events from background download tasks
             Some(dl_event) = rx.recv() => {
                 match dl_event {
                     DownloadEvent::Progress { id, track, percent } => {

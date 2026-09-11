@@ -2,6 +2,7 @@
 
 pub mod app;
 pub mod config;
+pub mod deps;
 pub mod downloader;
 pub mod events;
 pub mod history;

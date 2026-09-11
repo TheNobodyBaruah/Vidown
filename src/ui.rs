@@ -11,6 +11,18 @@ use ratatui::{
 
 /// Pure View function rendering the entire TUI from the App state.
 pub fn render(f: &mut Frame, app: &App) {
+    match app.current_screen {
+        crate::app::CurrentScreen::Setup => {
+            render_setup_screen(f, app);
+        }
+        crate::app::CurrentScreen::Main => {
+            render_main_screen(f, app);
+        }
+    }
+}
+
+/// Renders the main downloader application view.
+fn render_main_screen(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -26,7 +38,9 @@ pub fn render(f: &mut Frame, app: &App) {
     render_downloads(f, app, chunks[2]);
     render_footer(f, app, chunks[3]);
 
-    if let Some(history_modal) = &app.history_modal {
+    if let Some(help_modal) = &app.help_modal {
+        render_help_modal(f, help_modal);
+    } else if let Some(history_modal) = &app.history_modal {
         render_history_modal(f, app, history_modal);
     } else if let Some(path_modal) = &app.path_modal {
         render_path_modal(f, path_modal);
@@ -280,18 +294,18 @@ fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     let keybindings_help = match app.input_scheme {
         crate::app::InputScheme::StandardModal => match app.input_mode {
             InputMode::Normal => {
-                "[i] Edit  [Enter] Submit  [j/↓] Next  [k/↑] Prev  [e] Logs  [p/F3] Path  [g/F4] History  [F2] Vim  [q] Quit"
+                "[i] Edit  [Enter] Submit  [j/k] Move  [e] Logs  [p/F3] Path  [g/F4] History  [?/F1] Help  [F2] Vim  [q] Quit"
             }
             InputMode::Editing => {
-                "[Enter] Submit  [Esc] Normal  [F3] Path  [F4] History  [←/→] Cursor  [Backspace] Delete"
+                "[Enter] Submit  [Esc] Normal  [F1] Help  [F3] Path  [F4] History  [←/→] Cursor  [Backspace] Del"
             }
         },
         crate::app::InputScheme::Vim => match app.input_mode {
             InputMode::Normal => {
-                "[i/a] Insert  [j/k] Select  [x] Del  [p/F3] Path  [g/F4] History  [e] Logs  [F2] Modal  [q] Quit"
+                "[i/a] Insert  [j/k] Select  [x] Del  [p/F3] Path  [g/F4] History  [?/F1] Help  [e] Logs  [F2] Modal  [q] Quit"
             }
             InputMode::Editing => {
-                "[Esc] Normal  [Enter] Submit  [F3] Path  [F4] History  [←/→] Cursor"
+                "[Esc] Normal  [Enter] Submit  [F1] Help  [F3] Path  [F4] History  [←/→] Cursor"
             }
         },
     };
@@ -960,4 +974,590 @@ fn truncate_str(s: &str, max_chars: usize) -> String {
         let truncated: String = s.chars().take(max_chars.saturating_sub(1)).collect();
         format!("{}…", truncated)
     }
+}
+
+/// Renders the dedicated Dependency Setup & Onboarding screen.
+pub fn render_setup_screen(f: &mut Frame, app: &App) {
+    let area = f.area();
+    if area.width < 10 || area.height < 6 {
+        return;
+    }
+
+    let is_compact = area.height < 28;
+    let logo_height = if is_compact { 3 } else { 8 };
+    let tools_height = if is_compact { 7 } else { 8 };
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(logo_height), // ASCII banner / Header
+            Constraint::Length(tools_height), // Dependency Status Panel
+            Constraint::Min(6),              // Quick Start & Keybindings Guide
+            Constraint::Length(3),           // Footer instructions / actions
+        ])
+        .split(area);
+
+    render_setup_banner(f, chunks[0], is_compact);
+    render_setup_tools(f, app, chunks[1]);
+    render_setup_guide(f, app, chunks[2]);
+    render_setup_footer(f, app, chunks[3]);
+}
+
+/// Renders the ASCII logo banner or a compact header at the top of the setup screen.
+fn render_setup_banner(f: &mut Frame, area: Rect, is_compact: bool) {
+    if is_compact {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Cyan));
+        let p = Paragraph::new(Line::from(vec![
+            Span::styled(
+                " VIDOWN ",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "  Dependency Setup & Quick Start Guide",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]))
+        .alignment(Alignment::Center)
+        .block(block);
+        f.render_widget(p, area);
+    } else {
+        let banner_lines = vec![
+            Line::from(Span::styled(
+                r#" __      ___     _                     "#,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                r#" \ \    / (_)   | |                    "#,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                r#"  \ \  / / _  __| | _____      ___ __  "#,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                r#"   \ \/ / | |/ _` |/ _ \ \ /\ / / '_ \ "#,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                r#"    \  /  | | (_| | (_) \ V  V /| | | |"#,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(
+                r#"     \/   |_|\__,_|\___/ \_/\_/ |_| |_|"#,
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )),
+            Line::from(vec![
+                Span::styled(
+                    "Terminal Video Downloader",
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled("  •  ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    "First-Time Setup & Onboarding",
+                    Style::default().fg(Color::Yellow),
+                ),
+            ]),
+        ];
+        let p = Paragraph::new(banner_lines).alignment(Alignment::Center);
+        f.render_widget(p, area);
+    }
+}
+
+/// Renders the status of required tools on the setup screen.
+fn render_setup_tools(f: &mut Frame, app: &App, area: Rect) {
+    let setup = match &app.setup_state {
+        Some(s) => s,
+        None => return,
+    };
+
+    let border_color = match setup.phase {
+        crate::app::SetupPhase::Complete => Color::Green,
+        crate::app::SetupPhase::Error(_) => Color::Red,
+        _ => Color::Cyan,
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color))
+        .title(" Required Tools & External Dependencies ");
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let mut lines = Vec::new();
+    for tool in &setup.tools {
+        let (icon, icon_style, status_text, status_style) = match &tool.status {
+            crate::deps::ToolSetupStatus::Found(loc) => (
+                " ✔ ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+                format!("[Ready: {}]", loc),
+                Style::default().fg(Color::Green),
+            ),
+            crate::deps::ToolSetupStatus::Installed => (
+                " ✔ ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+                "[Installed in local data bin]".to_string(),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            crate::deps::ToolSetupStatus::Downloading { percent } => (
+                " ⟳ ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+                format!("[Downloading: {:.1}%]", percent),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            crate::deps::ToolSetupStatus::Extracting => (
+                " ⟳ ",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+                "[Extracting archive...]".to_string(),
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            crate::deps::ToolSetupStatus::PendingDownload => (
+                " ○ ",
+                Style::default().fg(Color::Yellow),
+                "[Pending download]".to_string(),
+                Style::default().fg(Color::Yellow),
+            ),
+            crate::deps::ToolSetupStatus::Failed(err) => (
+                " ✖ ",
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+                format!("[Failed: {}]", err),
+                Style::default()
+                    .fg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            crate::deps::ToolSetupStatus::Checking => (
+                " … ",
+                Style::default().fg(Color::DarkGray),
+                "[Checking system...]".to_string(),
+                Style::default().fg(Color::DarkGray),
+            ),
+        };
+
+        lines.push(Line::from(vec![
+            Span::styled(icon, icon_style),
+            Span::styled(
+                format!("{:<38}", tool.display_name),
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" "),
+            Span::styled(status_text, status_style),
+        ]));
+    }
+
+    let p = Paragraph::new(lines);
+    f.render_widget(p, inner);
+}
+
+/// Renders the Quick Start / How to Use guide on the setup screen.
+fn render_setup_guide(f: &mut Frame, app: &App, area: Rect) {
+    let scroll_offset = app
+        .setup_state
+        .as_ref()
+        .map(|s| s.help_scroll)
+        .unwrap_or(0);
+
+    let title = if scroll_offset > 0 {
+        format!(
+            " Quick Start & Keybinding Guide (Scrolled: {}) - [↑/↓ or j/k] to scroll ",
+            scroll_offset
+        )
+    } else {
+        " Quick Start & Keybinding Guide - [↑/↓ or j/k] to scroll ".to_string()
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::White))
+        .title(title);
+
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let guide_lines = vec![
+        Line::from(vec![
+            Span::styled(
+                " • Downloading Videos: ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(
+                "Press [i] or [Enter] to enter URL editing mode. Type or paste your video link, then press [Enter] to start downloading.",
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " • List Navigation:    ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(
+                "Use [j] or [↓] to move down, [k] or [↑] to move up through active and past downloads. Press [e] to view detailed logs and error traces.",
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " • Keybinding Schemes: ",
+                Style::default()
+                    .fg(Color::Magenta)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(
+                "Press [F2] anytime to toggle between Modal (Standard) mode and Vim navigation (h/j/k/l/x/0/$).",
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " • Download Location:  ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(
+                "Press [p] or [F3] to open the destination folder modal. Changes are automatically saved to your system config file.",
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " • Download History:   ",
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(
+                "Press [g] or [F4] to open the persistent History Inspector. Press [r] to re-enqueue, [o] to open the file in explorer, [d] to delete.",
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " • Persistent Help:    ",
+                Style::default()
+                    .fg(Color::LightYellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Press [?] or [F1] from the main screen at any time to reopen this guide."),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " • Clean Exit:         ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(
+                "Press [q] from normal mode or [Ctrl+C] from anywhere to safely restore the terminal and quit.",
+            ),
+        ]),
+    ];
+
+    let p = Paragraph::new(guide_lines)
+        .wrap(Wrap { trim: true })
+        .scroll((scroll_offset as u16, 0));
+
+    f.render_widget(p, inner);
+}
+
+/// Renders the action footer of the setup screen.
+fn render_setup_footer(f: &mut Frame, app: &App, area: Rect) {
+    let setup = match &app.setup_state {
+        Some(s) => s,
+        None => return,
+    };
+
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::DarkGray));
+
+    let content_line = match &setup.phase {
+        crate::app::SetupPhase::Complete => Line::from(vec![
+            Span::styled(
+                " [READY] ",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(" All required tools are configured! "),
+            Span::styled(
+                "Press [Enter] to launch Vidown >>",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]),
+        crate::app::SetupPhase::Error(msg) => Line::from(vec![
+            Span::styled(
+                " [ERROR] ",
+                Style::default()
+                    .fg(Color::White)
+                    .bg(Color::Red)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!(" {} ", msg), Style::default().fg(Color::Red)),
+            Span::styled(
+                "[r] ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Retry  "),
+            Span::styled(
+                "[c] ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Continue anyway  "),
+            Span::styled(
+                "[q] ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Quit"),
+        ]),
+        _ => Line::from(vec![
+            Span::styled(
+                " [WORKING] ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(
+                " Downloading & verifying dependencies in local data directory... Please wait.",
+            ),
+        ]),
+    };
+
+    let p = Paragraph::new(content_line).block(block);
+    f.render_widget(p, area);
+}
+
+/// Renders the persistent help guide modal overlay on the main screen.
+pub fn render_help_modal(f: &mut Frame, modal: &crate::app::HelpModal) {
+    let area = centered_rect(82, 80, f.area());
+    if area.width < 24 || area.height < 10 {
+        return;
+    }
+
+    // Clear underneath the modal
+    f.render_widget(Clear, area);
+
+    let modal_block = Block::default()
+        .title(" How to Use Vidown / Keybinding Guide ")
+        .borders(Borders::ALL)
+        .border_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+
+    let inner = modal_block.inner(area);
+    f.render_widget(modal_block, area);
+
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(6),    // Scrollable help content
+            Constraint::Length(1), // Footer instructions
+        ])
+        .split(inner);
+
+    let help_lines = vec![
+        Line::from(vec![Span::styled(
+            "VIDOWN - Fast Asynchronous Terminal Video Downloader",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::raw(""),
+        Line::from(vec![Span::styled(
+            "1. URL Input & Downloading",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![
+            Span::styled(
+                "   • [i] or [Enter]: ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Enter Editing mode. Paste or type your target video URL."),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "   • [Enter] (while editing): ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Submit URL to start background download task."),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "   • [Esc] (while editing): ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Cancel input and return to Normal navigation mode."),
+        ]),
+        Line::raw(""),
+        Line::from(vec![Span::styled(
+            "2. Downloads List & Inspection",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![
+            Span::styled(
+                "   • [j] / [↓]: ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Select next download item in the list."),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "   • [k] / [↑]: ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Select previous download item in the list."),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "   • [e]: ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Open full Detail & Log modal for the selected download item."),
+        ]),
+        Line::raw(""),
+        Line::from(vec![Span::styled(
+            "3. Configuration & History",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![
+            Span::styled(
+                "   • [p] or [F3]: ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(
+                "Open Download Directory modal. Set custom folder or reset to default with [Ctrl+D].",
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "   • [g] or [F4]: ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(
+                "Open Download History. Browse completed & failed items, [r] retry, [o] open folder.",
+            ),
+        ]),
+        Line::raw(""),
+        Line::from(vec![Span::styled(
+            "4. Keybinding Schemes",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![
+            Span::styled(
+                "   • [F2]: ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Toggle between Standard Modal mode and Vim navigation scheme."),
+        ]),
+        Line::raw(""),
+        Line::from(vec![Span::styled(
+            "5. System & Help",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )]),
+        Line::from(vec![
+            Span::styled(
+                "   • [?] or [F1]: ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Toggle this How to Use / Keybinding Guide modal."),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "   • [q] or [Ctrl+C]: ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Safely exit Vidown and restore terminal."),
+        ]),
+    ];
+
+    let content = Paragraph::new(help_lines)
+        .wrap(Wrap { trim: true })
+        .scroll((modal.scroll_offset as u16, 0));
+    f.render_widget(content, chunks[0]);
+
+    let footer = Paragraph::new(Line::from(vec![Span::styled(
+        "Press [Esc], [Enter], [q], or [?/F1] to close  •  [↑/↓ or j/k] to scroll",
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
+    )]))
+    .alignment(Alignment::Center);
+    f.render_widget(footer, chunks[1]);
 }

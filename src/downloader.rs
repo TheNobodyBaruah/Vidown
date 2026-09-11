@@ -14,9 +14,15 @@ use tokio::sync::mpsc;
 pub static PROGRESS_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(\d+(?:\.\d+)?)%").expect("Failed to compile progress regex"));
 
-/// Checks if Node.js runtime is available on the system PATH.
+/// Checks if Node.js runtime is available on the system PATH or local user data bin directory.
 fn is_node_available() -> bool {
-    std::process::Command::new("node")
+    if crate::deps::check_tool(crate::deps::RequiredTool::Node)
+        != crate::deps::ToolLocation::Missing
+    {
+        return true;
+    }
+    let node_bin = crate::deps::resolve_binary("node");
+    std::process::Command::new(node_bin)
         .arg("--version")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -112,7 +118,9 @@ pub async fn perform_download(
     let output_template = output_dir.join("%(title)s.%(ext)s");
     let output_str = output_template.to_string_lossy().to_string();
 
-    let mut cmd = Command::new("yt-dlp");
+    let yt_dlp_bin = crate::deps::resolve_binary("yt-dlp");
+    let mut cmd = Command::new(yt_dlp_bin);
+    crate::deps::inject_bin_to_command(&mut cmd);
 
     // Conditionally include --js-runtime node with graceful fallback
     if is_node_available() {
@@ -137,7 +145,7 @@ pub async fn perform_download(
             let _ = tx
                 .send(DownloadEvent::Error {
                     id,
-                    error: format!("Failed to spawn yt-dlp (is it in PATH?): {}", e),
+                    error: format!("Failed to spawn yt-dlp (is it installed?): {}", e),
                 })
                 .await;
             return;
