@@ -13,12 +13,18 @@ Welcome to the internal engineering guide for **Vidown**. This document serves a
    - [3.3 The View: `src/ui.rs`](#33-the-view-srcuirs)
    - [3.4 The Controller / Event Loop: `src/events.rs`](#34-the-controller--event-loop-srceventsrs)
    - [3.5 Domain Layer: `src/downloader.rs`](#35-domain-layer-srcdownloaderrs)
-   - [3.6 Terminal Lifecycle: `src/terminal.rs`](#36-terminal-lifecycle-srcterminalrs)
-   - [3.7 Public Crate Root: `src/lib.rs`](#37-public-crate-root-srclibrs)
+   - [3.6 Automated Dependency Management: `src/deps.rs`](#36-automated-dependency-management-srcdepsrs)
+   - [3.7 Download History Management: `src/history.rs`](#37-download-history-management-srchistoryrs)
+   - [3.8 User Configuration: `src/config.rs`](#38-user-configuration-srcconfigrs)
+   - [3.9 Terminal Lifecycle: `src/terminal.rs`](#39-terminal-lifecycle-srcterminalrs)
+   - [3.10 Public Crate Root: `src/lib.rs`](#310-public-crate-root-srclibrs)
 4. [Testing Architecture & Strategies](#4-testing-architecture--strategies)
    - [4.1 State & Interaction Tests (`tests/app_tests.rs`)](#41-state--interaction-tests-testsapp_testsrs)
-   - [4.2 Domain Regex Tests (`tests/downloader_tests.rs`)](#42-domain-regex-tests-testsdownloader_testsrs)
-   - [4.3 Headless Buffer & TestBackend Tests (`tests/ui_tests.rs`)](#43-headless-buffer--testbackend-tests-testsui_testsrs)
+   - [4.2 Dependency Management Tests (`tests/deps_tests.rs`)](#42-dependency-management-tests-testsdeps_testsrs)
+   - [4.3 Download History Tests (`tests/history_tests.rs`)](#43-download-history-tests-testshistory_testsrs)
+   - [4.4 Configuration Persistence Tests (`tests/config_tests.rs`)](#44-configuration-persistence-tests-testsconfig_testsrs)
+   - [4.5 Domain Regex & Process Tests (`tests/downloader_tests.rs`)](#45-domain-regex--process-tests-testsdownloader_testsrs)
+   - [4.6 Headless Buffer & TestBackend Tests (`tests/ui_tests.rs`)](#46-headless-buffer--testbackend-tests-testsui_testsrs)
 5. [Key Design Decisions & Engineering Rationale](#5-key-design-decisions--engineering-rationale)
 6. [Tracing a User Request (The Byte & Event Lifecycle)](#6-tracing-a-user-request-the-byte--event-lifecycle)
 7. [Extension Guide: Adding New Features](#7-extension-guide-adding-new-features)
@@ -27,7 +33,7 @@ Welcome to the internal engineering guide for **Vidown**. This document serves a
 
 ## 1. High-Level Architectural Mental Model
 
-Vidown is architected using the **Model-View-Update (MVU)** pattern (popularized by the Elm programming language), combined with the **Actor Model** using the asynchronous **Tokio** runtime:
+Vidown is architected using the **Model-View-Update (MVU)** pattern (popularized by Elm), combined with the **Actor Model** using the asynchronous **Tokio** runtime:
 
 ```
                   ┌──────────────────────────────────────────────┐
@@ -46,10 +52,10 @@ Vidown is architected using the **Model-View-Update (MVU)** pattern (popularized
                  ▼ (Mutates)                                     ▼ (Spawns)
         ┌─────────────────┐                             ┌─────────────────┐
         │   src/app.rs    │                             │src/downloader.rs│
-        │   (The Model)   │                             │ (Domain Layer)  │
+        │   (The Model)   │                             │  src/deps.rs    │
         └────────┬────────┘                             └────────┬────────┘
                  │                                               │
-                 │ Immutable &App                                │ MPSC DownloadEvents
+                 │ Immutable &App                                │ MPSC Events
                  ▼                                               ▼
         ┌─────────────────┐                             ┌─────────────────┐
         │    src/ui.rs    │                             │  Tokio Select!  │
@@ -63,7 +69,7 @@ Vidown is architected using the **Model-View-Update (MVU)** pattern (popularized
 ```
 
 ### The Three Pillars:
-1. **The Model (`App` in `src/app.rs`)**: Single source of truth. Owns the text input buffer, concurrent download list, modal state, cursor position, and UI flags.
+1. **The Model (`App` in `src/app.rs`)**: Single source of truth. Owns the text input buffer, concurrent download list, modal states (Path, History, Details, Help), setup bootstrapping state, cursor positions, and UI flags.
 2. **The View (`ui::render` in `src/ui.rs`)**: A strictly pure function: `f(&mut Frame, &App)`. It takes an immutable reference to `App` and translates state directly into visual widgets. It contains **no business logic**, performs **no side effects**, and **never blocks**.
 3. **The Update (`src/events.rs` & `src/main.rs`)**: The asynchronous circulatory system. It consumes keyboard events and background task channel messages, updates the Model, and triggers the View to render the next frame.
 
@@ -78,17 +84,22 @@ Vidown/
 ├── PLAN.md                  # Detailed architectural design and milestone roadmap
 ├── README.md                # User manual, setup instructions, and keybindings
 ├── PROJECT_STR.md           # This document (engineering deep dive)
+├── walkthrough.md           # Implementation verification walkthrough
 ├── src/
 │   ├── lib.rs               # Library root re-exporting modules for binary & integration tests
-│   ├── main.rs              # Tokio runtime entry point, terminal init, and event loop
-│   ├── app.rs               # The Model: App struct, DownloadItem, PathModal, input modes
-│   ├── config.rs            # Persistence: User config directory & TOML file serializer/parser
-│   ├── ui.rs                # The View: Ratatui layout, Gauge rendering, and modal overlays
+│   ├── main.rs              # Tokio runtime entry point, terminal init, and select! event loop
+│   ├── app.rs               # The Model: App struct, DownloadItem, modals, input modes, screen states
+│   ├── deps.rs              # Dependency bootstrapping: hybrid PATH vs local bin detection & downloads
+│   ├── history.rs           # History persistence: JSON serialization, FIFO limits, file manager launch
+│   ├── config.rs            # Persistence: OS user config directory & TOML file serializer/parser
+│   ├── ui.rs                # The View: Ratatui layout, Setup screen, Gauges, and modal overlays
 │   ├── events.rs            # The Update: Key event dispatcher, Modal & Vim keybinding schemes
 │   ├── downloader.rs        # Domain Layer: Asynchronous yt-dlp & FFmpeg process manager
 │   └── terminal.rs          # Low-level terminal setup, raw mode, and panic recovery hooks
 └── tests/
     ├── app_tests.rs         # Unit tests for state transitions, path modal, and key handling
+    ├── deps_tests.rs        # Unit & integration tests for dependency detection & setup workflow
+    ├── history_tests.rs     # Unit tests for history persistence, FIFO pruning, and file manager
     ├── config_tests.rs      # Unit tests for TOML serialization, escaping, and persistence
     ├── downloader_tests.rs  # Unit tests for yt-dlp stdout progress parsing regex
     └── ui_tests.rs          # Headless Buffer rendering tests & TestBackend simulation
@@ -106,9 +117,10 @@ Vidown/
 `main.rs` is the application orchestrator. Its responsibility is strictly restricted to:
 1. Initializing error tracking (`color_eyre`).
 2. Setting up the terminal via `terminal::init()`.
-3. Instantiating the shared `App` state and MPSC communication channel.
-4. Running the asynchronous `tokio::select!` event loop.
-5. Guaranteeing terminal restoration upon exit.
+3. Instantiating the shared `App` state and MPSC communication channels.
+4. Spawning initial background tasks (e.g. `spawn_setup_task` if dependencies are missing).
+5. Running the asynchronous `tokio::select!` event loop multiplexing keystrokes, setup events, and download events.
+6. Guaranteeing terminal restoration upon exit.
 
 #### Key Code Structure & Logic
 ```rust
@@ -117,13 +129,20 @@ async fn main() -> Result<()> {
     color_eyre::install()?;
     let mut terminal = terminal::init()?;
     let mut app = App::new();
+
     let (tx, mut rx) = mpsc::channel::<DownloadEvent>(128);
+    let (setup_tx, mut setup_rx) = mpsc::channel::<SetupEvent>(32);
+
+    if app.current_screen == CurrentScreen::Setup {
+        video_downloader::deps::spawn_setup_task(setup_tx.clone());
+    }
+
     let mut event_reader = EventStream::new();
     let mut tick_interval = tokio::time::interval(Duration::from_millis(16));
 ```
 - **Tokio Multi-threaded Runtime**: `#[tokio::main]` initializes a work-stealing thread pool capable of multiplexing lightweight green tasks across all CPU cores.
 - **`EventStream::new()`**: Converts raw terminal keystrokes and resize events from `crossterm` into a non-blocking asynchronous stream implementing `futures::Stream`.
-- **`tick_interval`**: Enforces a 60 FPS clock tick (16 ms) ensuring that even when user input is idle, download animations and progress gauges render fluidly.
+- **`tick_interval`**: Enforces a 60 FPS clock tick (16 ms) ensuring that even when user input is idle, download animations, setup progress gauges, and spin-renders execute fluidly.
 
 #### The `tokio::select!` Loop
 ```rust
@@ -131,15 +150,18 @@ tokio::select! {
     // Branch 1: User Terminal Inputs
     Some(crossterm_event) = event_reader.next() => { ... }
 
-    // Branch 2: Background Download Task Updates
+    // Branch 2: Asynchronous Dependency Setup Worker Events
+    Some(setup_event) = setup_rx.recv() => {
+        app.handle_setup_event(setup_event);
+    }
+
+    // Branch 3: Background Download Task Updates
     Some(dl_event) = rx.recv() => { ... }
 
-    // Branch 3: Clock Tick (Framerate enforcement)
+    // Branch 4: Clock Tick (Framerate enforcement)
     _ = tick_interval.tick() => {}
 }
 ```
-**Why `tokio::select!`?**
-In a traditional synchronous loop, calling `rx.recv()` or `event::read()` would block the entire operating system thread. If no keystroke is pressed, a network progress update could not be drawn. If no network packet arrives, the user could not press `q` to quit. `tokio::select!` awaits multiple futures simultaneously; whichever branch completes first executes its block and immediately loops, delivering true real-time interactivity.
 
 ---
 
@@ -149,6 +171,35 @@ In a traditional synchronous loop, calling `rx.recv()` or `event::read()` would 
 `app.rs` contains the **state representation** of the entire application. It contains no terminal rendering code and no process spawning code. It provides deterministic methods to mutate the state.
 
 #### Core Structs & Enums
+
+##### `CurrentScreen` & Screen State
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurrentScreen {
+    Setup,
+    Main,
+}
+```
+- `CurrentScreen::Setup`: Displayed on first boot when required dependencies (`yt-dlp`, `ffmpeg`, `node`) are missing.
+- `CurrentScreen::Main`: The standard downloader interface.
+
+##### `SetupState` & `SetupPhase`
+Tracks the status of each tool during onboarding:
+```rust
+pub struct SetupState {
+    pub phase: SetupPhase,
+    pub tools: Vec<ToolSetupItem>,
+    pub status_message: String,
+    pub help_scroll: usize,
+}
+
+pub enum SetupPhase {
+    Checking,
+    Downloading,
+    Complete,
+    Error(String),
+}
+```
 
 ##### `InputScheme` & `InputMode`
 ```rust
@@ -177,32 +228,15 @@ pub struct DownloadItem {
     pub progress: f64,
     pub status: ItemStatus,
     pub logs: Vec<String>,
-}
-
-pub enum ItemStatus {
-    Queued,
-    Downloading,
-    Merging,
-    Completed,
-    Failed(String),
+    pub output_dir: String,
 }
 ```
-- Each download is an independent entity tagged with an incrementing integer `id`.
-- `track`: Stores whether track 1 (video) or track 2 (audio) is downloading.
-- `logs`: A ring-buffer capped at 200 entries to prevent unbounded RAM consumption over hours of uptime.
-- `filename`: Parsed dynamically from `yt-dlp` output when available, replacing the raw URL in the UI for cleaner presentation.
 
-##### `DetailModal`
-```rust
-pub struct DetailModal {
-    pub title: String,
-    pub url: String,
-    pub status: String,
-    pub logs: Vec<String>,
-    pub scroll_offset: usize,
-}
-```
-When `app.detail_modal` is `Some(modal)`, the View renders a centered dialog overlay. `scroll_offset` tracks the vertical viewport scroll position for inspecting long stderr dumps.
+##### Modals
+- `DetailModal`: Scrollable raw stdout/stderr logs and diagnostic backtraces for a download.
+- `PathModal`: Interactive text editor for setting the destination download directory.
+- `HistoryModal`: Interactive browser for persisted past downloads, with options to re-enqueue, open in OS file manager, or delete.
+- `HelpModal`: Persistent in-app quick-start and keybinding guide overlay accessible at any time via <kbd>?</kbd> or <kbd>F1</kbd>.
 
 ---
 
@@ -211,13 +245,36 @@ When `app.detail_modal` is `Some(modal)`, the View renders a centered dialog ove
 #### Purpose
 `ui.rs` is responsible for taking `&App` and drawing to a `ratatui::Frame`.
 
-#### The 4-Section Layout
+#### Screen Switching Architecture
+```rust
+pub fn render(f: &mut Frame, app: &App) {
+    match app.current_screen {
+        CurrentScreen::Setup => render_setup_screen(f, app),
+        CurrentScreen::Main => render_main_screen(f, app),
+    }
+}
+```
+
+#### 1. Setup Screen (`render_setup_screen`)
+- **ASCII Logo Banner**: Dynamically adapts between full ASCII banner (`VIDOWN`) on standard terminals and a compact header on micro-terminals.
+- **Dependency Status Panel**: Renders color-coded status badges for `yt-dlp`, `ffmpeg & ffprobe`, and `node`:
+  - `✔ [Ready: ...]` (Green)
+  - `⟳ [Downloading: XX.X%]` (Cyan)
+  - `⟳ [Extracting archive...]` (Magenta)
+  - `✖ [Failed: ...]` (Red)
+- **Embedded Quick-Start Guide**: Scrollable guide explaining every keybinding and concept.
+- **Action Footer**:
+  - Displays progress notices during setup.
+  - Prompts `[READY] Press [Enter] to launch Vidown >>` upon completion.
+  - Prompts `[r] Retry [c] Continue [q] Quit` upon error.
+
+#### 2. Main Screen (`render_main_screen`)
 The terminal screen is divided vertically using `ratatui::layout::Layout`:
 ```rust
 let chunks = Layout::default()
     .direction(Direction::Vertical)
     .constraints([
-        Constraint::Length(3), // 1. Header (Title, Scheme, Mode)
+        Constraint::Length(3), // 1. Header (Title, Scheme, Mode, Output Dir)
         Constraint::Length(3), // 2. URL Input Field
         Constraint::Min(8),    // 3. Downloads & Progress list (Expands dynamically)
         Constraint::Length(3), // 4. Status / Help Footer
@@ -225,25 +282,12 @@ let chunks = Layout::default()
     .split(f.area());
 ```
 
-#### Widget Details:
-1. **Header (`render_header`)**:
-   - Displays application branding: `VIDOWN Video Downloader`.
-   - Displays real-time status badges: `[Scheme: Modal | Mode: NORMAL]`.
-   - Formatted to fit comfortably within standard 80-column terminal windows without text truncation.
-2. **URL Input Field (`render_input`)**:
-   - Changes border color dynamically: **Green** in `Editing` mode, **Dark Gray** in `Normal` mode.
-   - When editing, calls `f.set_cursor_position((cursor_x, cursor_y))` so the hardware terminal cursor blinks at the exact character being typed.
-3. **Downloads List (`render_downloads`)**:
-   - Calculates visible item count based on remaining terminal height (`Constraint::Min(8)`).
-   - Each item renders a `Gauge` widget showing live percentage:
-     - Color-coded: Cyan for downloading, Magenta for FFmpeg merging, Green for completed, Red for failed.
-     - Formats track indicators: `[Track 1]`, `[Track 2]`, `[Merging Audio/Video]`.
-4. **Footer (`render_footer`)**:
-   - Shows context-sensitive keyboard shortcuts tailored to the active `InputScheme` and `InputMode`.
-5. **Modal Overlay (`render_modal`)**:
-   - Uses `centered_rect(75, 70, f.area())` to create a centered popup occupying 75% width and 70% height.
-   - **Crucial step**: Renders `ratatui::widgets::Clear` before rendering the modal block. In immediate-mode double-buffered TUIs, without `Clear`, the background text behind the modal would bleed through.
-   - Applies `modal.scroll_offset` to allow navigating through hundreds of lines of error logs.
+#### Modal Overlays
+Modals render with `ratatui::widgets::Clear` to prevent background bleed-through, with strict mutual exclusion:
+1. `HelpModal` (<kbd>?</kbd> / <kbd>F1</kbd>)
+2. `HistoryModal` (<kbd>g</kbd> / <kbd>F4</kbd>)
+3. `PathModal` (<kbd>p</kbd> / <kbd>F3</kbd>)
+4. `DetailModal` (<kbd>e</kbd> / <kbd>Enter</kbd> on item)
 
 ---
 
@@ -253,156 +297,124 @@ let chunks = Layout::default()
 `events.rs` maps raw input events from `crossterm` to state mutations in `App`.
 
 #### `handle_key_event`
-```rust
-pub fn handle_key_event(app: &mut App, key: KeyEvent) -> Option<(usize, String)>
-```
-- **KeyEventKind Deduplication**: Windows and modern terminals emit both `KeyEventKind::Press` and `KeyEventKind::Release`. `events.rs` explicitly filters out everything except `KeyEventKind::Press` to eliminate double-character typing bugs.
+- **KeyEventKind Deduplication**: Explicitly filters out `KeyEventKind::Release` to prevent double-typing on Windows.
+- **Setup Screen Mode**: If `app.current_screen == CurrentScreen::Setup`, delegates to `handle_setup_screen_key` (scroll guide, Enter to launch, r to retry, c to continue, q to quit).
+- **Persistent Help Modal**: If `app.help_modal.is_some()`, handles scrolling and dismissal.
 - **Global Shortcuts**:
   - `Ctrl+C`: Instantly sets `app.should_quit = true`.
   - `F2`: Toggles between `StandardModal` and `Vim` keybinding schemes.
-- **Modal Event Handling**: If `app.detail_modal.is_some()`, keys like `Esc`/`Enter` dismiss the modal, while `j`/`k` or `Down`/`Up` scroll the logs.
-- **Editing Mode Handling**:
-  - Typing characters inserts them at `app.cursor_position`.
-  - `Backspace` removes the preceding character; `Delete` removes the current character.
-  - `Left` / `Right` / `Home` / `End` adjust cursor indices with bounds checks.
-  - `Enter` calls `app.submit_input()`, returning `Some((id, url))` which signals `main.rs` to spawn the download worker.
-- **Vim Mode Handling**:
-  - `i`: Enters editing mode.
-  - `a`: Moves cursor forward by one and enters editing mode.
-  - `0` / `$`: Jumps to beginning / end of buffer.
-  - `x`: Deletes the character under the cursor without entering insert mode.
+  - `F3` / `p`: Toggles path configuration modal.
+  - `F4` / `g`: Toggles history modal.
+  - `?` / `F1`: Toggles help guide modal.
 
 ---
 
 ### 3.5 Domain Layer: `src/downloader.rs`
 
 #### Purpose
-`downloader.rs` handles the external world: spawning `yt-dlp` child processes, reading stdout/stderr streams, detecting tool dependencies, rate-limiting progress updates, and cleaning up processes on exit.
+`downloader.rs` handles the external world: spawning `yt-dlp` child processes, reading stdout/stderr streams, rate-limiting progress updates, extracting filenames portably, and cleaning up processes on exit.
 
-#### Key Features & Implementation:
-
-##### 1. Runtime Detection (`is_node_available`)
-```rust
-fn is_node_available() -> bool {
-    std::process::Command::new("node")
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
-```
-Video platforms frequently require JavaScript interpretation for signature decryption. If Node.js is present on the system, `--js-runtime node` is passed; if absent, it gracefully falls back without failing to spawn.
-
-##### 2. Asynchronous Process Execution
-`tokio::process::Command` is used instead of `std::process::Command`. This ensures the child process does not block OS threads:
-```rust
-let mut child = cmd.spawn()?;
-let stdout = child.stdout.take();
-let stderr = child.stderr.take();
-```
-
-##### 3. Dedicated Stderr Capture Task
-A detached task asynchronously buffers stderr lines and dispatches them as `DownloadEvent::Log`:
-```rust
-let stderr_handle = tokio::spawn(async move {
-    let mut captured_errors = Vec::new();
-    if let Some(err_stream) = stderr {
-        let mut reader = BufReader::new(err_stream).lines();
-        while let Ok(Some(line)) = reader.next_line().await {
-            captured_errors.push(line.clone());
-            let _ = tx_stderr.send(DownloadEvent::Log { id, message: line }).await;
-        }
-    }
-    captured_errors
-});
-```
-**Why this matters**: If `yt-dlp` printed directly to stderr, the raw ANSI escape codes would write directly over the Ratatui double-buffer, permanently corrupting the terminal UI. Capturing stderr keeps the display clean while capturing full diagnostic backtraces.
-
-##### 4. Precompiled Regex & Event Throttling
-```rust
-pub static PROGRESS_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(\d+(?:\.\d+)?)%").expect("Failed to compile progress regex")
-});
-```
-- `PROGRESS_RE` is compiled once globally using `std::sync::LazyLock`, avoiding regex recompilation overhead on every stdout line.
-- **Throttling Logic**: High-speed internet transfers emit dozens of stdout lines per millisecond. Emitting an MPSC channel message for each chunk saturates the Tokio executor. `downloader.rs` throttles updates so messages are only dispatched if:
-  1. $\ge 150\text{ ms}$ have passed since the last update, OR
-  2. The rounded percentage integer changed (e.g. $42.8\% \to 43.1\%$), OR
-  3. The download reached $100\%$.
-
-##### 5. Zombie Process Prevention
-```rust
-if tx.send(DownloadEvent::Progress { ... }).await.is_err() {
-    let _ = child.kill().await;
-    return;
-}
-```
-If the user closes the application, the receiving end of the MPSC channel is dropped. The next time the background task tries to send an event, `send().is_err()` detects this and immediately issues `child.kill().await`, ensuring no background orphan processes continue downloading gigabytes of data in secret.
+#### Key Implementation Details
+- **Binary Resolution**: Invokes `crate::deps::resolve_binary("yt-dlp")` to prefer Vidown's managed local binary if available.
+- **PATH Injection**: Invokes `crate::deps::inject_bin_to_command(&mut cmd)` to prepend Vidown's local bin directory to the child environment.
+- **Dedicated Stderr Task**: Buffers stderr lines asynchronously and emits `DownloadEvent::Log`.
+- **Precompiled Regex & Event Throttling**: Progress regex is compiled once globally via `LazyLock<Regex>`. Emits progress updates at most every 150 ms unless an integer step change or 100% completion occurs.
+- **Zombie Process Prevention**: If the receiver disconnects, `child.kill().await` is called immediately.
 
 ---
 
-### 3.6 Terminal Lifecycle: `src/terminal.rs`
+### 3.6 Automated Dependency Management: `src/deps.rs`
 
 #### Purpose
-`terminal.rs` abstracts entering and exiting terminal raw mode and managing alternate screens.
+`deps.rs` provides automated dependency detection, downloading, extraction, and execution environment configuration.
 
-#### Raw Mode vs. Cooked Mode
-- **Cooked Mode (Default)**: The OS buffers input until the user hits `Enter`, echoing every typed character directly to stdout.
-- **Raw Mode**: Bypasses OS line buffering and local echo. Every keystroke is dispatched to the application immediately.
+#### Hybrid Detection Strategy
+Checks availability for each required tool (`RequiredTool::YtDlp`, `RequiredTool::Ffmpeg`, `RequiredTool::Node`):
+1. **System PATH**: Searches `$PATH` for existing executable binaries. If present, uses them without downloading.
+2. **Local User Bin**: Searches Vidown's standard local data directory:
+   - Linux/WSL: `~/.local/share/vidown/bin/` (or `$XDG_DATA_HOME/vidown/bin/`)
+   - Windows: `%LOCALAPPDATA%\Vidown\bin\` (or `%USERPROFILE%\AppData\Local\Vidown\bin\`)
+   - Environment Override: `VIDOWN_BIN_DIR`
 
-#### The Alternate Screen Buffer
-When Vidown starts, it issues ANSI escape sequences (`EnterAlternateScreen`) telling the terminal emulator to switch to a secondary buffer. When Vidown exits (`LeaveAlternateScreen`), the terminal restores the user's previous shell history completely intact.
-
-#### Panic Recovery Hook
-```rust
-pub fn init() -> Result<Tui> {
-    let original_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |panic_info| {
-        let _ = restore();
-        original_hook(panic_info);
-    }));
-    ...
-}
-```
-**Why this is critical**: If a Rust application panics while the terminal is in raw mode, the terminal remains broken—keystrokes won't echo, `Enter` won't create newlines, and the user must blindly type `reset`. By intercepting panics, `terminal.rs` guarantees `restore()` runs before the crash report is printed.
+#### Download & Extraction Pipeline
+- Downloads official binaries or static archives:
+  - `yt-dlp`: Direct executable from GitHub releases.
+  - `ffmpeg`: Static build archives (`.tar.xz` for Linux, `.zip` for Windows) from `yt-dlp/FFmpeg-Builds`.
+  - `node`: Official binaries/archives from Node.js distribution mirrors.
+- Download fallbacks: tries `curl` with real-time percentage parsing $\to$ `wget` on Linux $\to$ PowerShell on Windows.
+- Extraction fallbacks: tries system `tar` $\to$ `unzip` $\to$ Python 3 standard library `tarfile`/`zipfile` (guaranteeing lzma/xz decompression without requiring an external `xz` package).
+- Sets executable permissions (`chmod +x` / `0o755`) on Unix binaries.
 
 ---
 
-### 3.7 Public Crate Root: `src/lib.rs`
+### 3.7 Download History Management: `src/history.rs`
 
 #### Purpose
-```rust
-pub mod app;
-pub mod downloader;
-pub mod events;
-pub mod terminal;
-pub mod ui;
-```
-Exposes all internal modules as a library crate (`video_downloader`). This enables tests in the `tests/` directory to import modules cleanly (`use video_downloader::app::App;`) rather than having to include them via awkward relative file paths.
+`history.rs` manages the persisted log of completed and failed downloads.
+
+#### Storage & Serialization
+- Stored as JSON in the user data directory:
+  - Linux/WSL: `~/.local/share/vidown/history.json`
+  - Windows: `%LOCALAPPDATA%\Vidown\history.json`
+- FIFO pruning: automatically keeps at most `history_limit` items (default: 100).
+- Atomic saves: writes to `.tmp` file and atomically renames to prevent corruption on sudden termination.
+- Desktop File Manager Launching: provides `open_in_file_manager` to highlight or open files using `explorer.exe` (Windows), `xdg-open` (Linux), or WSL Windows Explorer bridge (`wslview`/`explorer.exe`).
+
+---
+
+### 3.8 User Configuration: `src/config.rs`
+
+#### Purpose
+`config.rs` handles reading and writing the user's `config.toml`:
+- Stored in `%APPDATA%\vidown\config.toml` (Windows) or `~/.config/vidown/config.toml` (Linux/macOS).
+- Manages persistent settings:
+  - `output_dir`: Default destination folder.
+  - `history_limit`: Maximum number of history entries retained.
+
+---
+
+### 3.9 Terminal Lifecycle: `src/terminal.rs`
+
+#### Purpose
+Abstracts entering and exiting terminal raw mode, alternate screen buffers, and installs a panic recovery hook via `color_eyre` ensuring the terminal is restored to cooked mode even on sudden panics.
+
+---
+
+### 3.10 Public Crate Root: `src/lib.rs`
+
+#### Purpose
+Exposes internal modules (`app`, `config`, `deps`, `downloader`, `events`, `history`, `terminal`, `ui`) as a library crate so integration tests in `tests/` can import them cleanly.
 
 ---
 
 ## 4. Testing Architecture & Strategies
 
-Vidown employs three tiers of automated tests, achieving 100% test passing rates with zero warnings:
+Vidown maintains a comprehensive test suite of **104 tests** across 6 specialized test suites:
 
-### 4.1 State & Interaction Tests (`tests/app_tests.rs`)
-- **`test_app_initial_state`**: Verifies default values for input scheme, mode, and empty buffers.
-- **`test_input_mode_and_typing`**: Simulates typing `"http://test.com"`, pressing backspace, and exiting with `Esc`.
-- **`test_submit_download_and_concurrent_management`**: Enqueues multiple downloads, simulates independent progress updates, track switching (video $\to$ audio), and FFmpeg merging transitions.
-- **`test_vim_keybinding_scheme`**: Toggles to Vim mode with `F2`, exercises `0`, `$`, `x`, `a`, and `i`.
-- **`test_detail_modal_open_scroll_and_dismiss`**: Generates mock log streams, opens the modal with `e`, verifies scroll offsets with `j`/`k`, and dismisses with `Esc`.
+### 4.1 State & Interaction Tests (`tests/app_tests.rs` - 32 tests)
+- Initial state defaults, editing buffer, cursor boundaries, UTF-8 multibyte safety.
+- Modal mutual exclusions, Vim navigation, and concurrent task management.
 
-### 4.2 Domain Regex Tests (`tests/downloader_tests.rs`)
-- **`test_progress_regex_matches_various_formats`**: Validates extraction across integer percentages (`100%`), decimals (`45.8%`), leading spaces (`  0.1%`), and gigabyte transfers (`9.5% of 1.20GiB`).
-- **`test_progress_regex_ignores_non_progress_lines`**: Asserts that lines like `[download] Destination: ...` and `[Merger] ...` do not falsely match the progress regex.
+### 4.2 Dependency Management Tests (`tests/deps_tests.rs` - 24 tests)
+- Hybrid detection (system PATH vs local user bin vs missing).
+- Tool download specifications, recursive archive searching with depth bounding.
+- Setup state machine transitions, retry on failure, continue anyway, and quit.
+- Persistent help modal scrolling and micro-terminal safety.
 
-### 4.3 Headless Buffer & TestBackend Tests (`tests/ui_tests.rs`)
-- **`test_render_to_raw_buffer`**: Instantiates a headless `TestBackend(100, 24)` and renders `ui::render`. Converts the memory buffer cells into a multiline string and deterministically asserts that `"VIDOWN"`, `"NORMAL"`, `"Track 1"`, and `"64.0%"` are drawn at exact locations.
-- **`test_render_editing_mode_and_modal_overlay`**: Asserts that `[EDITING]` mode changes the header and that opening `DetailModal` correctly draws the modal overlay and error text without crashing.
-- **`test_interactive_session_with_test_backend`**: Simulates an entire interactive user journey (Launch $\to$ Press `i` $\to$ Type URL $\to$ Press `Enter` $\to$ Press `F2` $\to$ Press `q`) through `TestBackend` and asserts state mutations at every step.
+### 4.3 Download History Tests (`tests/history_tests.rs` - 14 tests)
+- JSON serialization/deserialization, FIFO pruning, corrupted file recovery.
+- Atomic file writes, path canonicalization, and file manager launching.
+
+### 4.4 Configuration Persistence Tests (`tests/config_tests.rs` - 12 tests)
+- TOML formatting, escaped quotes, comments handling, and round-trip saves.
+
+### 4.5 Domain Regex & Process Tests (`tests/downloader_tests.rs` - 4 tests)
+- Extraction progress percentage parsing regex across diverse formats and units.
+- Portable filename extraction from destination and merger lines.
+
+### 4.6 Headless Buffer & TestBackend Tests (`tests/ui_tests.rs` - 18 tests)
+- Headless `TestBackend` rendering of main, setup, and modal views.
+- 80x24 terminal constraint validation and viewport scrolling.
 
 ---
 
@@ -410,44 +422,27 @@ Vidown employs three tiers of automated tests, achieving 100% test passing rates
 
 | Architectural Decision | Chosen Strategy | Alternative Considered | Rationale |
 |---|---|---|---|
-| **Concurrency Communication** | Tokio MPSC Channels | `Arc<Mutex<App>>` | Shared state concurrency introduces lock contention and deadlocks between the 60 FPS UI thread and network workers. MPSC channels treat workers as isolated actors passing immutable values. |
-| **Media Extraction** | External `yt-dlp` subprocess | Pure Rust extraction library | Streaming video platform APIs change weekly (cipher signatures, DASH manifests). Pure Rust crates quickly become obsolete; `yt-dlp` is the actively maintained industry standard. |
-| **Error Reporting** | Dual Approach (Inline Badge + Modal Popup) | Simple CLI `eprintln!` | Printing directly to stderr corrupts the TUI screen. Stderr is captured into memory; the list shows a simple `Failed` badge while <kbd>e</kbd> opens full error logs. |
-| **Progress Event Throttling** | 150 ms timer / integer step gate | Emit every chunk | High-bandwidth downloads can generate 5,000 progress events per second. Flooding the channel would starve the UI thread and degrade frame rates. |
-| **Keybinding Schemes** | Dynamic scheme toggle (`F2`) | Hardcoded single scheme | Balances accessibility for casual terminal users (simple Modal edit) while catering to advanced power users accustomed to Vim navigation. |
+| **Dependency Management** | Automated bootstrapping into user data bin with hybrid PATH check | Manual user installation only | Eliminates the biggest barrier to entry (installing FFmpeg/Node/yt-dlp), delivering an "it-just-works" experience while respecting existing system packages. |
+| **Setup UX** | Dedicated setup screen with logo + progress + quick-start guide | Silent download or CLI prompt | Turns download wait time into an interactive onboarding tutorial that educates users on keybindings. |
+| **Concurrency Communication** | Tokio MPSC Channels | `Arc<Mutex<App>>` | Avoids lock contention between 60 FPS UI rendering and asynchronous network tasks. |
+| **Media Extraction** | External `yt-dlp` subprocess | Pure Rust extraction library | Platform extraction algorithms change frequently; `yt-dlp` is actively maintained and handles challenges reliably. |
+| **Error Reporting** | Dual Approach (Inline Badge + Modal Popup) | Simple CLI `eprintln!` | Captures full stderr backtraces into memory for inspection without corrupting TUI rendering. |
+| **Progress Throttling** | 150 ms timer / integer step gate | Emit every chunk | Prevents channel flooding and UI thread starvation during high-bandwidth transfers. |
+| **Keybinding Schemes** | Dynamic scheme toggle (<kbd>F2</kbd>) | Single hardcoded scheme | Welcomes casual users (Modal) while supporting power users (Vim). |
 
 ---
 
 ## 6. Tracing a User Request (The Byte & Event Lifecycle)
 
-Here is the exact step-by-step lifecycle of downloading a video in Vidown:
-
 1. **User Types URL**: User presses <kbd>i</kbd>, enters `Editing` mode, and types `https://...`.
 2. **Key Event Captured**: `crossterm` captures keypresses; `events::handle_key_event` appends chars to `app.input_buffer`.
-3. **User Presses Enter**:
-   - `events::handle_key_event` invokes `app.submit_input()`.
-   - `App` creates a new `DownloadItem` with `ItemStatus::Queued` and assigns task ID `1`.
-   - `handle_key_event` returns `Some((1, url))`.
-4. **Tokio Task Spawned**: `main.rs` receives the tuple, clones the MPSC sender `tx`, and invokes `tokio::spawn(downloader::perform_download(1, url, ...))`.
-5. **Subprocess Execution**: `downloader.rs` spawns `yt-dlp`. An asynchronous task monitors `stderr` while the main task monitors `stdout`.
-6. **Progress Streaming**:
-   - `yt-dlp` emits `[download]  25.4% of 100MiB...`.
-   - `downloader.rs` parses `25.4` using `PROGRESS_RE`.
-   - Since $>150\text{ ms}$ elapsed, it dispatches `DownloadEvent::Progress { id: 1, track: 1, percent: 25.4 }`.
-7. **UI Update**:
-   - `main.rs` select loop receives the message from `rx`.
-   - Calls `app.update_progress(1, 1, 25.4)`.
-8. **Double-Buffered Redraw**:
-   - `terminal.draw()` calls `ui::render(&mut f, &app)`.
-   - `render_download_item` reads `progress = 25.4` and renders a `Gauge` with a filled width proportional to $25.4\%$.
-   - Ratatui calculates the minimal ANSI diff and flushes only the changed cells to stdout.
-9. **FFmpeg Merger**:
-   - Both tracks finish. `yt-dlp` outputs `[Merger]`.
-   - `downloader.rs` emits `DownloadEvent::Merging { id: 1 }`.
-   - UI reflects `[Merging Audio/Video]` in Magenta.
-10. **Completion**:
-    - Process exits with code 0. `downloader.rs` emits `DownloadEvent::Success { id: 1 }`.
-    - Item status updates to `Completed`; gauge turns solid Green ($100\%$).
+3. **User Presses Enter**: `app.submit_input()` enqueues the download with `ItemStatus::Queued` and emits `(id, url)`.
+4. **Tokio Task Spawned**: `main.rs` select loop spawns `downloader::perform_download`.
+5. **Binary & Environment Injection**: `deps::resolve_binary` locates `yt-dlp`, and `deps::inject_bin_to_command` injects Vidown's local bin directory into `PATH`.
+6. **Progress Streaming**: `yt-dlp` emits stdout lines; `downloader.rs` parses percentages and dispatches throttled `DownloadEvent::Progress`.
+7. **Double-Buffered Redraw**: `terminal.draw()` calls `ui::render`, updating progress gauges at 60 FPS.
+8. **FFmpeg Merger**: `yt-dlp` muxes streams; status updates to `[Merging Audio/Video]`.
+9. **Completion**: Process exits cleanly; download records in `history.json` and status updates to `Completed`.
 
 ---
 
@@ -455,18 +450,15 @@ Here is the exact step-by-step lifecycle of downloading a video in Vidown:
 
 ### Adding a New Keybinding
 1. Open `src/events.rs`.
-2. Locate `handle_normal_key` or `handle_editing_key`.
-3. Match against `KeyCode::Char('your_key')`.
-4. Call or create a helper method on `app` (e.g. `app.delete_selected_download()`).
+2. Match against `KeyCode::Char('your_key')` in `handle_normal_key` or `handle_editing_key`.
+3. Call a helper method on `app`.
 
-### Adding a New Widget or View Section
+### Adding a New Tool to Manage
+1. Open `src/deps.rs`.
+2. Add a variant to `RequiredTool`.
+3. Implement its detection in `check_tool` and download specs in `get_download_specs`.
+
+### Adding a New Widget or Screen
 1. Open `src/ui.rs`.
-2. Adjust the constraints in `Layout::default().constraints([...])`.
-3. Create your new drawing function `fn render_custom_widget(f: &mut Frame, app: &App, area: Rect)`.
-4. Call it inside `pub fn render(f: &mut Frame, app: &App)`.
-
-### Adding Custom yt-dlp Flags (e.g. Custom Quality or Format)
-1. Open `src/downloader.rs`.
-2. Locate the command builder in `perform_download`.
-3. Add `.arg("--your-flag")`.
-4. If you want this to be user-configurable, add the field to `DownloadItem` or `App` in `src/app.rs` and pass it into `perform_download`.
+2. Create a drawing function `fn render_custom(...)`.
+3. Call it inside `pub fn render(f: &mut Frame, app: &App)`.
