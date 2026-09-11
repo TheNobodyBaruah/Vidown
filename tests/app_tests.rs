@@ -273,10 +273,14 @@ fn test_path_modal_commit_and_sanitization() {
     handle_key_event(&mut app, press_key(KeyCode::Enter));
     assert!(app.path_modal.is_none());
     assert_eq!(app.output_dir, test_dir_str);
-    assert!(temp_test_dir.exists(), "Directory should have been created automatically");
+    assert!(
+        temp_test_dir.exists(),
+        "Directory should have been created automatically"
+    );
 
     // Clean up temp test directory
     let _ = std::fs::remove_dir_all(&temp_test_dir);
+    let _ = video_downloader::config::save_config("./downloads");
 }
 
 #[test]
@@ -399,7 +403,10 @@ fn test_sanitize_path_function() {
     assert_eq!(sanitize_path("   "), "./downloads");
     assert_eq!(sanitize_path("\"C:\\My Videos\""), "C:\\My Videos");
     assert_eq!(sanitize_path("'C:\\My Videos'"), "C:\\My Videos");
-    assert_eq!(sanitize_path("  \"/home/user/downloads\"  "), "/home/user/downloads");
+    assert_eq!(
+        sanitize_path("  \"/home/user/downloads\"  "),
+        "/home/user/downloads"
+    );
     assert_eq!(sanitize_path("~/downloads"), "~/downloads"); // Literal without ~ expansion
     assert_eq!(sanitize_path("./custom"), "./custom");
 }
@@ -440,6 +447,7 @@ fn test_path_modal_ctrl_d_and_ctrl_u_case_insensitive() {
 #[test]
 fn test_path_modal_cursor_out_of_bounds_resilience() {
     let mut app = App::new();
+    app.output_dir = "./downloads".to_string();
     handle_key_event(&mut app, press_char('p'));
     if let Some(modal) = &mut app.path_modal {
         modal.cursor_position = 999;
@@ -458,4 +466,342 @@ fn test_sanitize_path_nested_and_unclosed_quotes() {
     assert_eq!(sanitize_path("\"\""), "./downloads");
     assert_eq!(sanitize_path("''"), "./downloads");
     assert_eq!(sanitize_path("\"  \""), "./downloads");
+}
+
+#[test]
+fn test_app_records_completed_and_failed_downloads_in_history() {
+    let mut app = App::new_empty();
+    let id1 = app.enqueue_download("https://example.com/video1.mp4".to_string());
+    app.update_filename(id1, "video1.mp4".to_string());
+    app.update_success(id1);
+
+    assert_eq!(app.history.len(), 1);
+    let entry1 = &app.history[0];
+    assert_eq!(entry1.url, "https://example.com/video1.mp4");
+    assert_eq!(entry1.title.as_deref(), Some("video1.mp4"));
+    assert_eq!(
+        entry1.status,
+        video_downloader::history::HistoryStatus::Completed
+    );
+    assert!(entry1.file_path.as_ref().unwrap().contains("video1.mp4"));
+    assert!(entry1.error_message.is_none());
+
+    let id2 = app.enqueue_download("https://example.com/video2.mp4".to_string());
+    app.update_error(id2, "Connection timeout".to_string());
+
+    assert_eq!(app.history.len(), 2);
+    // Newest is at index 0
+    let entry2 = &app.history[0];
+    assert_eq!(entry2.url, "https://example.com/video2.mp4");
+    assert_eq!(
+        entry2.status,
+        video_downloader::history::HistoryStatus::Failed
+    );
+    assert_eq!(entry2.error_message.as_deref(), Some("Connection timeout"));
+}
+
+#[test]
+fn test_history_modal_open_and_close_shortcuts() {
+    let mut app = App::new_empty();
+    assert!(app.history_modal.is_none());
+
+    // 'g' in Normal mode opens the modal
+    handle_key_event(&mut app, press_char('g'));
+    assert!(app.history_modal.is_some());
+
+    // 'g' again closes the modal
+    handle_key_event(&mut app, press_char('g'));
+    assert!(app.history_modal.is_none());
+
+    // 'g' opens, 'Esc' closes
+    handle_key_event(&mut app, press_char('g'));
+    assert!(app.history_modal.is_some());
+    handle_key_event(&mut app, press_key(KeyCode::Esc));
+    assert!(app.history_modal.is_none());
+
+    // 'g' opens, 'q' closes
+    handle_key_event(&mut app, press_char('g'));
+    assert!(app.history_modal.is_some());
+    handle_key_event(&mut app, press_char('q'));
+    assert!(app.history_modal.is_none());
+
+    // 'g' opens, 'F4' closes
+    handle_key_event(&mut app, press_char('g'));
+    assert!(app.history_modal.is_some());
+    handle_key_event(&mut app, press_key(KeyCode::F(4)));
+    assert!(app.history_modal.is_none());
+}
+
+#[test]
+fn test_history_modal_f4_global_toggle_in_editing_mode() {
+    let mut app = App::new_empty();
+    // Switch to editing mode
+    handle_key_event(&mut app, press_char('i'));
+    assert_eq!(app.input_mode, InputMode::Editing);
+
+    // Press F4 globally
+    handle_key_event(&mut app, press_key(KeyCode::F(4)));
+    assert!(app.history_modal.is_some());
+
+    // Press F4 again to toggle off
+    handle_key_event(&mut app, press_key(KeyCode::F(4)));
+    assert!(app.history_modal.is_none());
+}
+
+#[test]
+fn test_history_modal_open_via_g_in_vim_mode() {
+    let mut app = App::new_empty();
+    // Switch to Vim mode
+    handle_key_event(&mut app, press_key(KeyCode::F(2)));
+    assert_eq!(app.input_scheme, InputScheme::Vim);
+
+    // 'g' in Vim mode opens the history modal
+    handle_key_event(&mut app, press_char('g'));
+    assert!(app.history_modal.is_some());
+
+    // 'q' dismisses the modal
+    handle_key_event(&mut app, press_char('q'));
+    assert!(app.history_modal.is_none());
+}
+
+#[test]
+fn test_history_modal_navigation_and_selection() {
+    let mut app = App::new_empty();
+    for i in 1..=3 {
+        let id = app.enqueue_download(format!("https://site.com/{}", i));
+        app.update_success(id);
+    }
+    assert_eq!(app.history.len(), 3);
+
+    // Open modal
+    handle_key_event(&mut app, press_char('g'));
+    assert_eq!(app.history_modal.as_ref().unwrap().selected, 0);
+
+    // 'j' moves down
+    handle_key_event(&mut app, press_char('j'));
+    assert_eq!(app.history_modal.as_ref().unwrap().selected, 1);
+
+    // Down arrow moves down
+    handle_key_event(&mut app, press_key(KeyCode::Down));
+    assert_eq!(app.history_modal.as_ref().unwrap().selected, 2);
+
+    // 'j' wraps to 0
+    handle_key_event(&mut app, press_char('j'));
+    assert_eq!(app.history_modal.as_ref().unwrap().selected, 0);
+
+    // 'k' wraps to 2
+    handle_key_event(&mut app, press_char('k'));
+    assert_eq!(app.history_modal.as_ref().unwrap().selected, 2);
+
+    // Home jumps to 0
+    handle_key_event(&mut app, press_key(KeyCode::Home));
+    assert_eq!(app.history_modal.as_ref().unwrap().selected, 0);
+
+    // End jumps to 2
+    handle_key_event(&mut app, press_key(KeyCode::End));
+    assert_eq!(app.history_modal.as_ref().unwrap().selected, 2);
+}
+
+#[test]
+fn test_history_modal_retry_re_enqueues_url_and_closes_modal() {
+    let mut app = App::new_empty();
+    let id = app.enqueue_download("https://site.com/failed_video.mp4".to_string());
+    app.update_error(id, "Network timeout".to_string());
+
+    assert_eq!(app.history.len(), 1);
+
+    // Open history modal
+    handle_key_event(&mut app, press_char('g'));
+    assert!(app.history_modal.is_some());
+
+    // Press 'r' to retry
+    let retry_res = handle_key_event(&mut app, press_char('r'));
+    assert!(retry_res.is_some());
+
+    let (retried_id, retried_url) = retry_res.unwrap();
+    assert_eq!(retried_url, "https://site.com/failed_video.mp4");
+    assert_eq!(retried_id, 2);
+
+    // Modal must be closed and active downloads list now has the retried item
+    assert!(app.history_modal.is_none());
+    assert_eq!(app.downloads.len(), 2);
+    assert_eq!(app.downloads[1].url, "https://site.com/failed_video.mp4");
+}
+
+#[test]
+fn test_history_modal_delete_entry_and_bounds_handling() {
+    let mut app = App::new_empty();
+    for i in 1..=2 {
+        let id = app.enqueue_download(format!("https://site.com/{}", i));
+        app.update_success(id);
+    }
+    assert_eq!(app.history.len(), 2);
+
+    // Open modal and navigate to index 1
+    handle_key_event(&mut app, press_char('g'));
+    handle_key_event(&mut app, press_char('j'));
+    assert_eq!(app.history_modal.as_ref().unwrap().selected, 1);
+
+    // Press 'd' to delete entry at index 1
+    handle_key_event(&mut app, press_char('d'));
+    assert_eq!(app.history.len(), 1);
+    assert_eq!(app.history_modal.as_ref().unwrap().selected, 0);
+
+    // Delete last remaining entry
+    handle_key_event(&mut app, press_char('d'));
+    assert_eq!(app.history.len(), 0);
+    assert_eq!(app.history_modal.as_ref().unwrap().selected, 0);
+
+    // Deleting on empty list does not panic
+    handle_key_event(&mut app, press_char('d'));
+    assert_eq!(app.history.len(), 0);
+}
+
+#[test]
+fn test_history_capacity_limit_and_fifo_pruning() {
+    let mut app = App::new_empty();
+    app.history_limit = 50;
+
+    for i in 1..=55 {
+        let entry = video_downloader::history::HistoryEntry::new_completed(
+            i,
+            format!("https://site.com/video{}", i),
+            Some(format!("video{}.mp4", i)),
+            Some(format!("/downloads/video{}.mp4", i)),
+        );
+        app.add_history_entry(entry);
+    }
+
+    // Capacity enforced at 50
+    assert_eq!(app.history.len(), 50);
+    // Index 0 is the newest (entry 55)
+    assert_eq!(app.history[0].id, 55);
+    // Last entry is entry 6 (entries 1-5 were pruned)
+    assert_eq!(app.history[49].id, 6);
+}
+
+#[test]
+fn test_history_modal_strict_mutual_exclusion() {
+    let mut app = App::new_empty();
+
+    // Open path modal
+    app.open_path_modal();
+    assert!(app.path_modal.is_some());
+    assert!(app.history_modal.is_none());
+
+    // Open history modal -> closes path modal
+    app.open_history_modal();
+    assert!(app.history_modal.is_some());
+    assert!(app.path_modal.is_none());
+
+    // Open path modal -> closes history modal
+    app.open_path_modal();
+    assert!(app.path_modal.is_some());
+    assert!(app.history_modal.is_none());
+
+    // Close all
+    app.close_modal();
+    assert!(app.history_modal.is_none());
+    assert!(app.path_modal.is_none());
+}
+
+#[test]
+fn test_history_modal_case_insensitive_shortcuts() {
+    let mut app = App::new_empty();
+    let id1 = app.enqueue_download("https://a.com/vid1.mp4".to_string());
+    app.update_success(id1);
+    let id2 = app.enqueue_download("https://a.com/vid2.mp4".to_string());
+    app.update_success(id2);
+
+    // Uppercase 'G' opens modal
+    handle_key_event(&mut app, press_char('G'));
+    assert!(app.history_modal.is_some());
+    assert_eq!(app.history_modal.as_ref().unwrap().selected, 0);
+
+    // Uppercase 'J' moves selection down
+    handle_key_event(&mut app, press_char('J'));
+    assert_eq!(app.history_modal.as_ref().unwrap().selected, 1);
+
+    // Uppercase 'K' moves selection up
+    handle_key_event(&mut app, press_char('K'));
+    assert_eq!(app.history_modal.as_ref().unwrap().selected, 0);
+
+    // Uppercase 'D' deletes selected entry
+    handle_key_event(&mut app, press_char('D'));
+    assert_eq!(app.history.len(), 1);
+
+    // Uppercase 'R' retries
+    let retry = handle_key_event(&mut app, press_char('R'));
+    assert!(retry.is_some());
+    assert!(app.history_modal.is_none());
+
+    // Reopen with 'G' and close with uppercase 'Q'
+    handle_key_event(&mut app, press_char('G'));
+    assert!(app.history_modal.is_some());
+    handle_key_event(&mut app, press_char('Q'));
+    assert!(app.history_modal.is_none());
+}
+
+#[test]
+fn test_history_modal_empty_actions_feedback() {
+    let mut app = App::new_empty();
+    handle_key_event(&mut app, press_char('g'));
+    assert!(app.history_modal.is_some());
+
+    // Retry on empty
+    let retry_res = handle_key_event(&mut app, press_char('r'));
+    assert!(retry_res.is_none());
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("No history entry to retry.")
+    );
+
+    // Delete on empty
+    handle_key_event(&mut app, press_char('d'));
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("No history entry to delete.")
+    );
+
+    // Open on empty
+    handle_key_event(&mut app, press_char('o'));
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("No download history entry selected.")
+    );
+
+    // Enter on empty
+    handle_key_event(&mut app, press_key(KeyCode::Enter));
+    assert_eq!(
+        app.status_message.as_deref(),
+        Some("No download history entry selected.")
+    );
+}
+
+#[test]
+fn test_history_modal_open_shortcuts_o_and_enter() {
+    let mut app = App::new_empty();
+    let id = app.enqueue_download("https://test.com/vid.mp4".to_string());
+    app.update_filename(id, "vid.mp4".to_string());
+    app.update_success(id);
+
+    app.open_history_modal();
+
+    // 'o' triggers open_selected_history_in_file_manager
+    handle_key_event(&mut app, press_char('o'));
+    assert!(
+        app.status_message
+            .as_ref()
+            .map(|s| s.contains("file explorer"))
+            .unwrap_or(false)
+    );
+
+    // 'Enter' also triggers open_selected_history_in_file_manager
+    handle_key_event(&mut app, press_key(KeyCode::Enter));
+    assert!(
+        app.status_message
+            .as_ref()
+            .map(|s| s.contains("file explorer"))
+            .unwrap_or(false)
+    );
 }

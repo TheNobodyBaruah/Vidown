@@ -5,10 +5,10 @@ use crossterm::{
     cursor::Show,
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
-use std::io::{stdout, Stdout};
+use ratatui::{Terminal, backend::CrosstermBackend};
+use std::io::{Stdout, stdout};
 
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 

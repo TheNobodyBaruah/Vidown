@@ -37,10 +37,21 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> Option<(usize, String)>
         return None;
     }
 
+    // Global toggle for history modal (F4) - works in Normal and Editing modes
+    if key.code == KeyCode::F(4) {
+        app.toggle_history_modal();
+        return None;
+    }
+
     // Global toggle for download directory modal (F3) - works in Normal and Editing modes
     if key.code == KeyCode::F(3) {
         app.toggle_path_modal();
         return None;
+    }
+
+    // If history modal is currently open, handle history modal keys
+    if app.history_modal.is_some() {
+        return handle_history_modal_key(app, key);
     }
 
     // If path modal dialog is currently open, handle modal editing/dismissal
@@ -160,6 +171,10 @@ fn handle_normal_key(app: &mut App, key: KeyEvent) -> Option<(usize, String)> {
                 app.open_path_modal();
                 None
             }
+            KeyCode::Char('g') | KeyCode::Char('G') => {
+                app.open_history_modal();
+                None
+            }
             _ => None,
         },
         InputScheme::Vim => match key.code {
@@ -208,8 +223,70 @@ fn handle_normal_key(app: &mut App, key: KeyEvent) -> Option<(usize, String)> {
                 app.open_path_modal();
                 None
             }
+            KeyCode::Char('g') | KeyCode::Char('G') => {
+                app.open_history_modal();
+                None
+            }
             _ => None,
         },
+    }
+}
+
+/// Handles keys when the download history modal is open.
+fn handle_history_modal_key(app: &mut App, key: KeyEvent) -> Option<(usize, String)> {
+    match key.code {
+        // Esc, q, g, F4 closes the modal
+        KeyCode::Esc
+        | KeyCode::Char('q')
+        | KeyCode::Char('Q')
+        | KeyCode::Char('g')
+        | KeyCode::Char('G')
+        | KeyCode::F(4) => {
+            app.close_history_modal();
+            None
+        }
+        // Navigation: j/Down for next, k/Up for previous
+        KeyCode::Down | KeyCode::Char('j') | KeyCode::Char('J') => {
+            let total = app.history.len();
+            if let Some(modal) = &mut app.history_modal {
+                modal.next(total);
+            }
+            None
+        }
+        KeyCode::Up | KeyCode::Char('k') | KeyCode::Char('K') => {
+            let total = app.history.len();
+            if let Some(modal) = &mut app.history_modal {
+                modal.previous(total);
+            }
+            None
+        }
+        KeyCode::Home => {
+            if let Some(modal) = &mut app.history_modal {
+                modal.selected = 0;
+            }
+            None
+        }
+        KeyCode::End => {
+            if let Some(modal) = &mut app.history_modal
+                && !app.history.is_empty()
+            {
+                modal.selected = app.history.len() - 1;
+            }
+            None
+        }
+        // Retry download: 'r' or 'R'
+        KeyCode::Char('r') | KeyCode::Char('R') => app.retry_selected_history(),
+        // Open file / folder: 'o' or 'O' or Enter
+        KeyCode::Char('o') | KeyCode::Char('O') | KeyCode::Enter => {
+            app.open_selected_history_in_file_manager();
+            None
+        }
+        // Delete history entry: 'd' or 'D'
+        KeyCode::Char('d') | KeyCode::Char('D') => {
+            app.delete_selected_history_entry();
+            None
+        }
+        _ => None,
     }
 }
 

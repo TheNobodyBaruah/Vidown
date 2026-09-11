@@ -2,11 +2,11 @@
 
 use crate::app::{App, InputMode, ItemStatus};
 use ratatui::{
+    Frame,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Gauge, List, ListItem, Paragraph, Wrap},
-    Frame,
 };
 
 /// Pure View function rendering the entire TUI from the App state.
@@ -26,7 +26,9 @@ pub fn render(f: &mut Frame, app: &App) {
     render_downloads(f, app, chunks[2]);
     render_footer(f, app, chunks[3]);
 
-    if let Some(path_modal) = &app.path_modal {
+    if let Some(history_modal) = &app.history_modal {
+        render_history_modal(f, app, history_modal);
+    } else if let Some(path_modal) = &app.path_modal {
         render_path_modal(f, path_modal);
     } else if let Some(modal) = &app.detail_modal {
         render_modal(f, modal);
@@ -36,11 +38,17 @@ pub fn render(f: &mut Frame, app: &App) {
 /// Renders the top title, scheme/mode indicator, and active download directory header.
 fn render_header(f: &mut Frame, app: &App, area: Rect) {
     let mode_style = match app.input_mode {
-        InputMode::Editing => Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        InputMode::Normal => Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        InputMode::Editing => Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD),
+        InputMode::Normal => Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
     };
 
-    let scheme_style = Style::default().fg(Color::Magenta).add_modifier(Modifier::BOLD);
+    let scheme_style = Style::default()
+        .fg(Color::Magenta)
+        .add_modifier(Modifier::BOLD);
 
     let mode_str = match app.input_mode {
         InputMode::Editing => "EDITING",
@@ -66,7 +74,13 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
     };
 
     let title_line = Line::from(vec![
-        Span::styled(" VIDOWN ", Style::default().fg(Color::White).bg(Color::Blue).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " VIDOWN ",
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Blue)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(subtitle),
         Span::styled("[Scheme: ", Style::default().fg(Color::DarkGray)),
         Span::styled(scheme_name, scheme_style),
@@ -74,7 +88,12 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
         Span::styled(mode_str, mode_style),
         Span::styled("] ", Style::default().fg(Color::DarkGray)),
         Span::styled("[Dir: ", Style::default().fg(Color::DarkGray)),
-        Span::styled(dir_display, Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            dir_display,
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("]", Style::default().fg(Color::DarkGray)),
     ]);
 
@@ -89,8 +108,14 @@ fn render_header(f: &mut Frame, app: &App, area: Rect) {
 /// Renders the URL input text field with active cursor positioning.
 fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let (border_color, title_text) = match app.input_mode {
-        InputMode::Editing => (Color::Green, " URL Input (Editing - Press [Enter] to download, [Esc] to cancel) "),
-        InputMode::Normal => (Color::DarkGray, " URL Input (Normal - Press [i] or [Enter] to edit) "),
+        InputMode::Editing => (
+            Color::Green,
+            " URL Input (Editing - Press [Enter] to download, [Esc] to cancel) ",
+        ),
+        InputMode::Normal => (
+            Color::DarkGray,
+            " URL Input (Normal - Press [i] or [Enter] to edit) ",
+        ),
     };
 
     let block = Block::default()
@@ -113,7 +138,8 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
 
     // Set terminal cursor in editing mode
     if app.input_mode == InputMode::Editing {
-        let cursor_x = inner_area.x + (app.cursor_position as u16).min(inner_area.width.saturating_sub(1));
+        let cursor_x =
+            inner_area.x + (app.cursor_position as u16).min(inner_area.width.saturating_sub(1));
         let cursor_y = inner_area.y;
         f.set_cursor_position((cursor_x, cursor_y));
     }
@@ -166,9 +192,16 @@ fn render_downloads(f: &mut Frame, app: &App, area: Rect) {
 }
 
 /// Renders a single download entry with its status badge and progress gauge.
-fn render_download_item(f: &mut Frame, item: &crate::app::DownloadItem, is_selected: bool, area: Rect) {
+fn render_download_item(
+    f: &mut Frame,
+    item: &crate::app::DownloadItem,
+    is_selected: bool,
+    area: Rect,
+) {
     let border_style = if is_selected {
-        Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+        Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -198,11 +231,21 @@ fn render_download_item(f: &mut Frame, item: &crate::app::DownloadItem, is_selec
     let title = Line::from(vec![
         Span::styled(
             if is_selected { "> " } else { "  " },
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(format!("#{}: ", item.id), Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("#{}: ", item.id),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
         Span::raw(display_name),
-        Span::styled(track_info, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            track_info,
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(
             format!("({})", item.status.label()),
             Style::default().fg(status_color),
@@ -236,22 +279,39 @@ fn render_download_item(f: &mut Frame, item: &crate::app::DownloadItem, is_selec
 fn render_footer(f: &mut Frame, app: &App, area: Rect) {
     let keybindings_help = match app.input_scheme {
         crate::app::InputScheme::StandardModal => match app.input_mode {
-            InputMode::Normal => "[i] Edit  [Enter] Submit  [j/↓] Next  [k/↑] Prev  [e] Logs  [p/F3] Path  [F2] Vim  [q] Quit",
-            InputMode::Editing => "[Enter] Submit  [Esc] Normal  [F3] Path  [←/→] Cursor  [Backspace] Delete",
+            InputMode::Normal => {
+                "[i] Edit  [Enter] Submit  [j/↓] Next  [k/↑] Prev  [e] Logs  [p/F3] Path  [g/F4] History  [F2] Vim  [q] Quit"
+            }
+            InputMode::Editing => {
+                "[Enter] Submit  [Esc] Normal  [F3] Path  [F4] History  [←/→] Cursor  [Backspace] Delete"
+            }
         },
         crate::app::InputScheme::Vim => match app.input_mode {
-            InputMode::Normal => "[i/a] Insert  [j/k] Select  [x] Del  [p/F3] Path  [e] Logs  [F2] Modal  [q] Quit",
-            InputMode::Editing => "[Esc] Normal  [Enter] Submit  [F3] Path  [←/→] Cursor",
+            InputMode::Normal => {
+                "[i/a] Insert  [j/k] Select  [x] Del  [p/F3] Path  [g/F4] History  [e] Logs  [F2] Modal  [q] Quit"
+            }
+            InputMode::Editing => {
+                "[Esc] Normal  [Enter] Submit  [F3] Path  [F4] History  [←/→] Cursor"
+            }
         },
     };
 
     let status_line = app.status_message.as_deref().unwrap_or(keybindings_help);
 
     let footer = Paragraph::new(Line::from(vec![
-        Span::styled(" [HELP] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " [HELP] ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(status_line),
     ]))
-    .block(Block::default().borders(Borders::ALL).border_style(Style::default().fg(Color::DarkGray)));
+    .block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::DarkGray)),
+    );
 
     f.render_widget(footer, area);
 }
@@ -266,7 +326,11 @@ fn render_modal(f: &mut Frame, modal: &crate::app::DetailModal) {
     let modal_block = Block::default()
         .title(format!(" {} ", modal.title))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD));
+        .border_style(
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let inner = modal_block.inner(area);
     f.render_widget(modal_block, area);
@@ -282,15 +346,30 @@ fn render_modal(f: &mut Frame, modal: &crate::app::DetailModal) {
 
     let info_text = vec![
         Line::from(vec![
-            Span::styled("URL: ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "URL: ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(&modal.url),
         ]),
         Line::from(vec![
-            Span::styled("Status: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Status: ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(&modal.status),
         ]),
         Line::from(vec![
-            Span::styled("Directory: ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Directory: ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::raw(&modal.output_dir),
         ]),
     ];
@@ -317,13 +396,19 @@ fn render_modal(f: &mut Frame, modal: &crate::app::DetailModal) {
             .collect()
     };
 
-    let logs_list = List::new(log_items)
-        .block(Block::default().borders(Borders::TOP).border_style(Style::default().fg(Color::DarkGray)).title(" Logs / Stderr "));
+    let logs_list = List::new(log_items).block(
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(Color::DarkGray))
+            .title(" Logs / Stderr "),
+    );
     f.render_widget(logs_list, chunks[1]);
 
     let footer_text = Paragraph::new(Line::from(Span::styled(
         "Press [Esc] or [Enter] to dismiss this modal",
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
     )))
     .alignment(Alignment::Center);
     f.render_widget(footer_text, chunks[2]);
@@ -343,7 +428,11 @@ fn render_path_modal(f: &mut Frame, modal: &crate::app::PathModal) {
     let modal_block = Block::default()
         .title(" Set Download Directory ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
+        .border_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
 
     let inner = modal_block.inner(modal_area);
     f.render_widget(modal_block, modal_area);
@@ -362,7 +451,9 @@ fn render_path_modal(f: &mut Frame, modal: &crate::app::PathModal) {
     // 1. Instruction line
     let instruction = Paragraph::new(Span::styled(
         "Destination directory for subsequent downloads:",
-        Style::default().fg(Color::White).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
     ));
     f.render_widget(instruction, chunks[0]);
 
@@ -386,12 +477,19 @@ fn render_path_modal(f: &mut Frame, modal: &crate::app::PathModal) {
             scroll_offset = cursor_pos.saturating_sub(visible_width.saturating_sub(1));
         }
 
-        let visible_text: String = modal.input.chars().skip(scroll_offset).take(visible_width).collect();
+        let visible_text: String = modal
+            .input
+            .chars()
+            .skip(scroll_offset)
+            .take(visible_width)
+            .collect();
 
         let input_widget = if modal.input.is_empty() {
             Paragraph::new(Span::styled(
                 "./downloads (default)",
-                Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::ITALIC),
             ))
         } else {
             Paragraph::new(visible_text)
@@ -400,7 +498,8 @@ fn render_path_modal(f: &mut Frame, modal: &crate::app::PathModal) {
 
         // Position terminal hardware cursor
         let cursor_offset = cursor_pos.saturating_sub(scroll_offset);
-        let cursor_screen_x = input_inner.x + (cursor_offset as u16).min(input_inner.width.saturating_sub(1));
+        let cursor_screen_x =
+            input_inner.x + (cursor_offset as u16).min(input_inner.width.saturating_sub(1));
         let cursor_screen_y = input_inner.y;
         f.set_cursor_position((cursor_screen_x, cursor_screen_y));
     }
@@ -408,19 +507,39 @@ fn render_path_modal(f: &mut Frame, modal: &crate::app::PathModal) {
     // 3. Hint
     let hint = Paragraph::new(Span::styled(
         "Empty resets to ./downloads. Paths are literal (no ~ expansion).",
-        Style::default().fg(Color::DarkGray).add_modifier(Modifier::ITALIC),
+        Style::default()
+            .fg(Color::DarkGray)
+            .add_modifier(Modifier::ITALIC),
     ));
     f.render_widget(hint, chunks[2]);
 
     // 4. Action Shortcuts
     let shortcuts = Paragraph::new(Line::from(vec![
-        Span::styled("[Enter] ", Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "[Enter] ",
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("Save  "),
-        Span::styled("[Esc] ", Style::default().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "[Esc] ",
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ),
         Span::raw("Cancel  "),
-        Span::styled("[Ctrl+D] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "[Ctrl+D] ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("Default  "),
-        Span::styled("[Ctrl+U] ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            "[Ctrl+U] ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw("Clear"),
     ]));
     f.render_widget(shortcuts, chunks[3]);
@@ -487,4 +606,358 @@ pub fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+/// Renders the download history modal dialog with a two-panel layout:
+/// - Left/Top: Scrollable list of past downloads with status indicators.
+/// - Right/Bottom: Inspector panel detailing title, URL, exact file destination, status, timestamp, and errors.
+fn render_history_modal(f: &mut Frame, app: &App, modal: &crate::app::HistoryModal) {
+    let area = centered_rect(82, 75, f.area());
+    if area.width < 24 || area.height < 8 {
+        return;
+    }
+
+    // Clear underneath the modal to avoid background bleed-through
+    f.render_widget(Clear, area);
+
+    let modal_block = Block::default()
+        .title(format!(" Download History ({}) ", app.history.len()))
+        .borders(Borders::ALL)
+        .border_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+
+    let inner = modal_block.inner(area);
+    f.render_widget(modal_block, area);
+
+    let main_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(5),    // Two-panel body area
+            Constraint::Length(1), // Bottom action shortcuts
+        ])
+        .split(inner);
+
+    let panels_area = main_chunks[0];
+    let footer_area = main_chunks[1];
+
+    // Bottom action shortcuts with responsive width adaptation
+    let shortcuts_line = if footer_area.width >= 80 {
+        Line::from(vec![
+            Span::styled(
+                "[↑/↓ or j/k] ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Select  "),
+            Span::styled(
+                "[r] ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Retry  "),
+            Span::styled(
+                "[o/Enter] ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Open File  "),
+            Span::styled(
+                "[d] ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Delete  "),
+            Span::styled(
+                "[q/Esc/g/F4] ",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Close"),
+        ])
+    } else if footer_area.width >= 58 {
+        Line::from(vec![
+            Span::styled(
+                "[j/k] ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Select  "),
+            Span::styled(
+                "[r] ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Retry  "),
+            Span::styled(
+                "[o/↵] ",
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Open  "),
+            Span::styled(
+                "[d] ",
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Del  "),
+            Span::styled(
+                "[q/Esc] ",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Close"),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled("[j/k] ", Style::default().fg(Color::Yellow)),
+            Span::raw("Sel "),
+            Span::styled("[r] ", Style::default().fg(Color::Cyan)),
+            Span::raw("Retry "),
+            Span::styled("[o] ", Style::default().fg(Color::Green)),
+            Span::raw("Open "),
+            Span::styled("[d] ", Style::default().fg(Color::Red)),
+            Span::raw("Del "),
+            Span::styled("[q] ", Style::default().fg(Color::DarkGray)),
+            Span::raw("Exit"),
+        ])
+    };
+
+    let shortcuts = Paragraph::new(shortcuts_line).alignment(Alignment::Center);
+    f.render_widget(shortcuts, footer_area);
+
+    // Two-panel layout: horizontal if wide enough, vertical if narrow
+    let (list_area, inspector_area) = if panels_area.width >= 70 {
+        let horizontal_split = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(45), // List panel
+                Constraint::Percentage(55), // Inspector panel
+            ])
+            .split(panels_area);
+        (horizontal_split[0], horizontal_split[1])
+    } else {
+        let vertical_split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(50), // List panel
+                Constraint::Percentage(50), // Inspector panel
+            ])
+            .split(panels_area);
+        (vertical_split[0], vertical_split[1])
+    };
+
+    // 1. List Panel
+    let list_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::White))
+        .title(" Past Downloads ");
+
+    if app.history.is_empty() {
+        let empty_msg = Paragraph::new(
+            "No download history recorded yet.\nCompleted and failed downloads will appear here.",
+        )
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(Color::DarkGray))
+        .wrap(Wrap { trim: true })
+        .block(list_block);
+        f.render_widget(empty_msg, list_area);
+    } else {
+        let list_inner = list_block.inner(list_area);
+        f.render_widget(list_block, list_area);
+
+        let visible_count = (list_inner.height as usize).max(1);
+        let selected = modal.selected.min(app.history.len().saturating_sub(1));
+        let mut scroll = modal.scroll_offset.get();
+
+        if selected < scroll {
+            scroll = selected;
+        } else if selected >= scroll + visible_count {
+            scroll = selected + 1 - visible_count;
+        }
+        if scroll + visible_count > app.history.len() {
+            scroll = app.history.len().saturating_sub(visible_count);
+        }
+        modal.scroll_offset.set(scroll);
+
+        let start_idx = scroll;
+        let end_idx = (start_idx + visible_count).min(app.history.len());
+
+        let max_text_width = (list_inner.width as usize).saturating_sub(12);
+
+        let mut list_items = Vec::new();
+        for item_idx in start_idx..end_idx {
+            let entry = &app.history[item_idx];
+            let is_selected = item_idx == selected;
+
+            let (status_badge, status_color) = match entry.status {
+                crate::history::HistoryStatus::Completed => ("[Done]", Color::Green),
+                crate::history::HistoryStatus::Failed => ("[Failed]", Color::Red),
+            };
+
+            let prefix = if is_selected { "> " } else { "  " };
+            let raw_display = entry.title.as_deref().unwrap_or(&entry.url);
+            let display_name = truncate_str(raw_display, max_text_width);
+
+            let item_style = if is_selected {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::White)
+            };
+
+            let line = Line::from(vec![
+                Span::styled(
+                    prefix,
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!("{:<8} ", status_badge),
+                    Style::default()
+                        .fg(status_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(display_name, item_style),
+            ]);
+            list_items.push(ListItem::new(line));
+        }
+
+        let list_widget = List::new(list_items);
+        f.render_widget(list_widget, list_inner);
+    }
+
+    // 2. Inspector Panel
+    let inspector_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(" Inspector Details ");
+
+    if app.history.is_empty() {
+        let empty_inspector = Paragraph::new("Select an item from history to view full details.")
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(Color::DarkGray))
+            .wrap(Wrap { trim: true })
+            .block(inspector_block);
+        f.render_widget(empty_inspector, inspector_area);
+    } else {
+        let selected = modal.selected.min(app.history.len().saturating_sub(1));
+        let entry = &app.history[selected];
+
+        let (status_text, status_color) = match entry.status {
+            crate::history::HistoryStatus::Completed => ("Completed", Color::Green),
+            crate::history::HistoryStatus::Failed => ("Failed", Color::Red),
+        };
+
+        let file_path_str = entry.file_path.as_deref().unwrap_or("N/A");
+        let file_exists = entry
+            .file_path
+            .as_ref()
+            .map(|p| std::path::Path::new(p).exists())
+            .unwrap_or(false);
+
+        let (exists_badge, exists_color) = if file_exists {
+            ("Exists on disk", Color::Green)
+        } else if entry.status == crate::history::HistoryStatus::Failed {
+            ("Not created", Color::DarkGray)
+        } else {
+            ("Not found on disk", Color::DarkGray)
+        };
+
+        let mut lines = vec![
+            Line::from(vec![
+                Span::styled(
+                    "Title: ",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(entry.title.as_deref().unwrap_or("N/A")),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "URL: ",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(&entry.url),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Destination: ",
+                    Style::default()
+                        .fg(Color::Green)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(file_path_str),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Status: ",
+                    Style::default()
+                        .fg(Color::Yellow)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    status_text,
+                    Style::default()
+                        .fg(status_color)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw("  ("),
+                Span::styled(exists_badge, Style::default().fg(exists_color)),
+                Span::raw(")"),
+            ]),
+            Line::from(vec![
+                Span::styled(
+                    "Timestamp: ",
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(&entry.timestamp),
+            ]),
+        ];
+
+        if let Some(err) = &entry.error_message {
+            lines.push(Line::from(vec![
+                Span::styled(
+                    "Error Details: ",
+                    Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(err),
+            ]));
+        }
+
+        let inspector_paragraph = Paragraph::new(lines)
+            .block(inspector_block)
+            .wrap(Wrap { trim: true });
+        f.render_widget(inspector_paragraph, inspector_area);
+    }
+}
+
+/// Truncates a string to at most `max_chars`, appending an ellipsis if truncated.
+fn truncate_str(s: &str, max_chars: usize) -> String {
+    let count = s.chars().count();
+    if count <= max_chars {
+        s.to_string()
+    } else if max_chars == 0 {
+        String::new()
+    } else if max_chars == 1 {
+        "…".to_string()
+    } else {
+        let truncated: String = s.chars().take(max_chars.saturating_sub(1)).collect();
+        format!("{}…", truncated)
+    }
 }

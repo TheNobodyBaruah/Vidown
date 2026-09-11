@@ -66,7 +66,9 @@ fn test_save_and_load_config_file_roundtrip() {
 
 #[test]
 fn test_load_config_non_existent() {
-    let non_existent = std::env::temp_dir().join("non_existent_vidown_dir").join("config.toml");
+    let non_existent = std::env::temp_dir()
+        .join("non_existent_vidown_dir")
+        .join("config.toml");
     let loaded = load_config_from_path(&non_existent);
     assert_eq!(loaded, None);
 }

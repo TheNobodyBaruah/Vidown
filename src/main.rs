@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use video_downloader::{
     app::App,
     downloader,
-    events::{handle_key_event, DownloadEvent},
+    events::{DownloadEvent, handle_key_event},
     terminal, ui,
 };
 
