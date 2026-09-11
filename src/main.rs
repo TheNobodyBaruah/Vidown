@@ -27,7 +27,9 @@ async fn main() -> Result<()> {
     let (setup_tx, mut setup_rx) = mpsc::channel::<video_downloader::deps::SetupEvent>(32);
 
     // If initial dependencies need to be installed, spawn background setup task
-    if app.current_screen == video_downloader::app::CurrentScreen::Setup {
+    if let Some(setup) = &app.setup_state
+        && setup.phase != video_downloader::app::SetupPhase::Complete
+    {
         video_downloader::deps::spawn_setup_task(setup_tx.clone());
     }
 

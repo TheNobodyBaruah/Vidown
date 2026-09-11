@@ -142,16 +142,22 @@ impl SetupState {
             });
         }
 
-        let phase = if has_missing {
-            SetupPhase::Downloading
+        let (phase, status_message) = if has_missing {
+            (
+                SetupPhase::Downloading,
+                "Checking dependencies...".to_string(),
+            )
         } else {
-            SetupPhase::Complete
+            (
+                SetupPhase::Complete,
+                "All dependencies are ready. Press [Enter] to start.".to_string(),
+            )
         };
 
         Self {
             phase,
             tools: tool_items,
-            status_message: "Checking dependencies...".to_string(),
+            status_message,
             help_scroll: 0,
         }
     }
@@ -444,11 +450,13 @@ fn is_test_environment() -> bool {
     if std::env::var("VIDOWN_NO_PERSIST").is_ok() {
         return true;
     }
-    if let Ok(exe) = std::env::current_exe() {
-        let exe_str = exe.to_string_lossy();
-        if exe_str.contains("/deps/") || exe_str.contains("\\deps\\") {
-            return true;
-        }
+    if let Ok(exe) = std::env::current_exe()
+        && exe
+            .parent()
+            .and_then(|p| p.file_name())
+            .is_some_and(|n| n == "deps")
+    {
+        return true;
     }
     false
 }
@@ -472,12 +480,8 @@ impl App {
         {
             (CurrentScreen::Main, None)
         } else {
-            let (all_ok, tools) = crate::deps::check_all_dependencies();
-            if all_ok {
-                (CurrentScreen::Main, None)
-            } else {
-                (CurrentScreen::Setup, Some(SetupState::new(tools)))
-            }
+            let (_all_ok, tools) = crate::deps::check_all_dependencies();
+            (CurrentScreen::Setup, Some(SetupState::new(tools)))
         };
 
         Self {

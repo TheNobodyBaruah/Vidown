@@ -737,3 +737,280 @@ fn test_setup_lifecycle_multiple_consecutive_failures() {
     assert_eq!(node_retry.status, ToolSetupStatus::Installed);
 }
 
+#[test]
+fn test_start_screen_always_opens_when_deps_complete() {
+    let tools = vec![
+        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
+        (RequiredTool::Ffmpeg, ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg"))),
+        (RequiredTool::Node, ToolLocation::SystemPath(PathBuf::from("/usr/bin/node"))),
+    ];
+    let state = SetupState::new(tools);
+    assert_eq!(state.phase, SetupPhase::Complete);
+    assert!(state.status_message.contains("All dependencies are ready"));
+    for tool in &state.tools {
+        assert!(matches!(tool.status, ToolSetupStatus::Found(_)));
+    }
+
+    let app = App::new_with_setup(state);
+    assert_eq!(app.current_screen, CurrentScreen::Setup);
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ui::render(f, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let buffer_str: String = (0..buffer.area.height)
+        .map(|y| {
+            let line: String = (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect();
+            format!("{}\n", line)
+        })
+        .collect();
+
+    assert!(buffer_str.contains("VIDOWN") || buffer_str.contains(r"\ \"));
+    assert!(buffer_str.contains("Required Tools"));
+    assert!(buffer_str.contains("Ready:"));
+    assert!(buffer_str.contains("Quick Start & Keybinding Guide"));
+    assert!(buffer_str.contains("Press [Enter] to Start  •  [?/F1] Full Keybindings Guide  •  [q] Quit"));
+}
+
+#[test]
+fn test_start_screen_enter_key_transitions_to_main() {
+    let tools = vec![
+        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
+        (RequiredTool::Ffmpeg, ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg"))),
+        (RequiredTool::Node, ToolLocation::SystemPath(PathBuf::from("/usr/bin/node"))),
+    ];
+    let state = SetupState::new(tools);
+    let mut app = App::new_with_setup(state);
+    assert_eq!(app.current_screen, CurrentScreen::Setup);
+
+    // Press Enter to transition to Main screen
+    handle_key_event(&mut app, press_key(KeyCode::Enter));
+    assert_eq!(app.current_screen, CurrentScreen::Main);
+    assert!(app.status_message.as_ref().unwrap().contains("Ready. Press [i]"));
+}
+
+#[test]
+fn test_start_screen_help_modal_and_scrolling() {
+    let tools = vec![
+        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
+        (RequiredTool::Ffmpeg, ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg"))),
+        (RequiredTool::Node, ToolLocation::SystemPath(PathBuf::from("/usr/bin/node"))),
+    ];
+    let state = SetupState::new(tools);
+    let mut app = App::new_with_setup(state);
+
+    // 1. Press '?' to open help modal from setup screen
+    handle_key_event(&mut app, press_char('?'));
+    assert!(app.help_modal.is_some());
+    assert_eq!(app.current_screen, CurrentScreen::Setup);
+
+    // 2. While help modal is open, 'j' scrolls help modal (not setup guide)
+    handle_key_event(&mut app, press_char('j'));
+    assert_eq!(app.help_modal.as_ref().unwrap().scroll_offset, 1);
+    assert_eq!(app.setup_state.as_ref().unwrap().help_scroll, 0);
+
+    // 3. Press '?' to close help modal
+    handle_key_event(&mut app, press_char('?'));
+    assert!(app.help_modal.is_none());
+    assert_eq!(app.current_screen, CurrentScreen::Setup);
+
+    // 4. Press F1 opens help modal
+    handle_key_event(&mut app, press_key(KeyCode::F(1)));
+    assert!(app.help_modal.is_some());
+
+    // 5. Enter closes help modal (does not immediately transition screen)
+    handle_key_event(&mut app, press_key(KeyCode::Enter));
+    assert!(app.help_modal.is_none());
+    assert_eq!(app.current_screen, CurrentScreen::Setup);
+
+    // 6. Now on setup screen, j scrolls setup guide
+    handle_key_event(&mut app, press_char('j'));
+    assert_eq!(app.setup_state.as_ref().unwrap().help_scroll, 1);
+
+    // 7. PageDown scrolls setup guide by 5
+    handle_key_event(&mut app, press_key(KeyCode::PageDown));
+    assert_eq!(app.setup_state.as_ref().unwrap().help_scroll, 6);
+
+    // 8. PageUp scrolls setup guide by 5
+    handle_key_event(&mut app, press_key(KeyCode::PageUp));
+    assert_eq!(app.setup_state.as_ref().unwrap().help_scroll, 1);
+
+    // 9. Enter now transitions to Main
+    handle_key_event(&mut app, press_key(KeyCode::Enter));
+    assert_eq!(app.current_screen, CurrentScreen::Main);
+}
+
+#[test]
+fn test_start_screen_quit_with_q() {
+    let tools = vec![
+        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
+        (RequiredTool::Ffmpeg, ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg"))),
+        (RequiredTool::Node, ToolLocation::SystemPath(PathBuf::from("/usr/bin/node"))),
+    ];
+    let state = SetupState::new(tools);
+    let mut app = App::new_with_setup(state);
+    assert!(!app.should_quit);
+
+    // Press 'q' on start screen quits
+    handle_key_event(&mut app, press_char('q'));
+    assert!(app.should_quit);
+}
+
+#[test]
+fn test_start_screen_help_modal_overlay_rendering() {
+    let tools = vec![
+        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
+    ];
+    let state = SetupState::new(tools);
+    let mut app = App::new_with_setup(state);
+    app.open_help_modal();
+
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ui::render(f, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let buffer_str: String = (0..buffer.area.height)
+        .map(|y| {
+            let line: String = (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect();
+            format!("{}\n", line)
+        })
+        .collect();
+
+    assert!(buffer_str.contains("How to Use Vidown / Keybinding Guide"));
+    assert!(buffer_str.contains("URL Input & Downloading"));
+    assert!(buffer_str.contains("Press [Esc], [Enter], [q], or [?/F1] to close"));
+}
+
+#[test]
+fn test_app_new_with_test_deps_starts_on_setup_screen() {
+    let _lock = ENV_MUTEX.lock().unwrap();
+    unsafe {
+        std::env::set_var("VIDOWN_TEST_DEPS", "1");
+    }
+
+    let app = App::new();
+    assert_eq!(app.current_screen, CurrentScreen::Setup);
+    assert!(app.setup_state.is_some());
+
+    unsafe {
+        std::env::remove_var("VIDOWN_TEST_DEPS");
+    }
+}
+
+#[test]
+fn test_start_screen_welcome_subtitle_when_ready() {
+    let tools = vec![
+        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
+        (RequiredTool::Ffmpeg, ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg"))),
+        (RequiredTool::Node, ToolLocation::SystemPath(PathBuf::from("/usr/bin/node"))),
+    ];
+    let state = SetupState::new(tools);
+    let app = App::new_with_setup(state);
+
+    // Standard width/height
+    let backend = TestBackend::new(100, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|f| ui::render(f, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let buffer_str: String = (0..buffer.area.height)
+        .map(|y| {
+            let line: String = (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect();
+            format!("{}\n", line)
+        })
+        .collect();
+
+    assert!(buffer_str.contains("Welcome & Quick Start Guide"));
+    assert!(!buffer_str.contains("First-Time Setup & Onboarding"));
+
+    // Compact mode (height < 28)
+    let backend_compact = TestBackend::new(100, 20);
+    let mut terminal_compact = Terminal::new(backend_compact).unwrap();
+    terminal_compact.draw(|f| ui::render(f, &app)).unwrap();
+    let buffer_compact = terminal_compact.backend().buffer();
+    let buffer_compact_str: String = (0..buffer_compact.area.height)
+        .map(|y| {
+            let line: String = (0..buffer_compact.area.width).map(|x| buffer_compact[(x, y)].symbol()).collect();
+            format!("{}\n", line)
+        })
+        .collect();
+
+    assert!(buffer_compact_str.contains("Vidown Start Screen & Quick Start Guide"));
+}
+
+#[test]
+fn test_start_screen_narrow_footer_adaptive_rendering() {
+    let tools = vec![
+        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
+    ];
+    let state = SetupState::new(tools);
+    let app = App::new_with_setup(state);
+
+    // Medium-narrow width (65 columns)
+    let backend_65 = TestBackend::new(65, 30);
+    let mut terminal_65 = Terminal::new(backend_65).unwrap();
+    terminal_65.draw(|f| ui::render(f, &app)).unwrap();
+    let buffer_65 = terminal_65.backend().buffer();
+    let str_65: String = (0..buffer_65.area.height)
+        .map(|y| {
+            let line: String = (0..buffer_65.area.width).map(|x| buffer_65[(x, y)].symbol()).collect();
+            format!("{}\n", line)
+        })
+        .collect();
+    assert!(str_65.contains("[Enter] Start"));
+    assert!(str_65.contains("[?/F1] Guide"));
+    assert!(str_65.contains("[q] Quit"));
+
+    // Ultra-narrow width (45 columns)
+    let backend_45 = TestBackend::new(45, 30);
+    let mut terminal_45 = Terminal::new(backend_45).unwrap();
+    terminal_45.draw(|f| ui::render(f, &app)).unwrap();
+    let buffer_45 = terminal_45.backend().buffer();
+    let str_45: String = (0..buffer_45.area.height)
+        .map(|y| {
+            let line: String = (0..buffer_45.area.width).map(|x| buffer_45[(x, y)].symbol()).collect();
+            format!("{}\n", line)
+        })
+        .collect();
+    assert!(str_45.contains("[Enter] Start  •  [q] Quit"));
+}
+
+#[test]
+fn test_start_screen_help_modal_esc_and_q_dismissal() {
+    let tools = vec![
+        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
+    ];
+    let state = SetupState::new(tools);
+    let mut app = App::new_with_setup(state);
+
+    // Open help modal with '?'
+    handle_key_event(&mut app, press_char('?'));
+    assert!(app.help_modal.is_some());
+
+    // Press 'q' while help modal is open -> closes modal, does NOT quit app
+    handle_key_event(&mut app, press_char('q'));
+    assert!(app.help_modal.is_none());
+    assert!(!app.should_quit);
+    assert_eq!(app.current_screen, CurrentScreen::Setup);
+
+    // Open help modal with F1
+    handle_key_event(&mut app, press_key(KeyCode::F(1)));
+    assert!(app.help_modal.is_some());
+
+    // Press Esc -> closes modal
+    handle_key_event(&mut app, press_key(KeyCode::Esc));
+    assert!(app.help_modal.is_none());
+    assert!(!app.should_quit);
+    assert_eq!(app.current_screen, CurrentScreen::Setup);
+
+    // Open help modal with F1
+    handle_key_event(&mut app, press_key(KeyCode::F(1)));
+    assert!(app.help_modal.is_some());
+
+    // Press F1 again -> toggles/closes modal
+    handle_key_event(&mut app, press_key(KeyCode::F(1)));
+    assert!(app.help_modal.is_none());
+    assert_eq!(app.current_screen, CurrentScreen::Setup);
+}
+
+
+

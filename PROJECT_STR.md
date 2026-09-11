@@ -180,7 +180,7 @@ pub enum CurrentScreen {
     Main,
 }
 ```
-- `CurrentScreen::Setup`: Displayed on first boot when required dependencies (`yt-dlp`, `ffmpeg`, `node`) are missing.
+- `CurrentScreen::Setup`: Always displayed on startup in normal runs; displays status of required dependencies (`yt-dlp`, `ffmpeg`, `node`), quick start guide, and action footer.
 - `CurrentScreen::Main`: The standard downloader interface.
 
 ##### `SetupState` & `SetupPhase`
@@ -265,7 +265,7 @@ pub fn render(f: &mut Frame, app: &App) {
 - **Embedded Quick-Start Guide**: Scrollable guide explaining every keybinding and concept.
 - **Action Footer**:
   - Displays progress notices during setup.
-  - Prompts `[READY] Press [Enter] to launch Vidown >>` upon completion.
+  - Prompts `Press [Enter] to Start  •  [?/F1] Full Keybindings Guide  •  [q] Quit` upon completion.
   - Prompts `[r] Retry [c] Continue [q] Quit` upon error.
 
 #### 2. Main Screen (`render_main_screen`)
@@ -389,17 +389,18 @@ Exposes internal modules (`app`, `config`, `deps`, `downloader`, `events`, `hist
 
 ## 4. Testing Architecture & Strategies
 
-Vidown maintains a comprehensive test suite of **104 tests** across 6 specialized test suites:
+Vidown maintains a comprehensive test suite of **113 tests** across 6 specialized test suites:
 
 ### 4.1 State & Interaction Tests (`tests/app_tests.rs` - 32 tests)
 - Initial state defaults, editing buffer, cursor boundaries, UTF-8 multibyte safety.
 - Modal mutual exclusions, Vim navigation, and concurrent task management.
 
-### 4.2 Dependency Management Tests (`tests/deps_tests.rs` - 24 tests)
+### 4.2 Dependency Management Tests (`tests/deps_tests.rs` - 33 tests)
 - Hybrid detection (system PATH vs local user bin vs missing).
 - Tool download specifications, recursive archive searching with depth bounding.
 - Setup state machine transitions, retry on failure, continue anyway, and quit.
-- Persistent help modal scrolling and micro-terminal safety.
+- Always-open start screen lifecycle, Enter transition to Main screen, F1/? keybinding modal overlay on start screen, and micro-terminal safety.
+- Adaptive narrow footer layout and dynamic banner subtitles.
 
 ### 4.3 Download History Tests (`tests/history_tests.rs` - 14 tests)
 - JSON serialization/deserialization, FIFO pruning, corrupted file recovery.

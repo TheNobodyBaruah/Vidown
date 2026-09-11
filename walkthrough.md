@@ -23,16 +23,19 @@ We implemented an automated dependency bootstrapping system, a dedicated first-t
 - **Child Process Environment Injection**:
   - `inject_bin_to_command(&mut Command)` prepends Vidown's local bin directory to child processes' `PATH`, guaranteeing `yt-dlp` automatically locates `ffmpeg` and `node`.
 
-### B. Dedicated Setup & Onboarding Screen (`src/ui.rs`, `src/app.rs`)
-- **First-Boot Detection**: On startup, `App::new()` checks dependencies. If any tool is missing, the application automatically enters `CurrentScreen::Setup`.
+### B. Dedicated Start & Setup Screen (`src/ui.rs`, `src/app.rs`)
+- **Always-Open Start Screen**: Outside automated test runners, Vidown always opens on the Start Screen (`CurrentScreen::Setup`) on startup, even when all dependencies (`yt-dlp`, `ffmpeg`, `node`) are already present and installed.
 - **ASCII Art Banner**: Renders the `VIDOWN` logo or an adaptive compact header on micro-terminals.
-- **Live Progress & Status Panel**:
-  - Shows real-time statuses (`✔ Ready`, `⟳ Downloading: XX.X%`, `⟳ Extracting...`, `✖ Failed`) for all dependencies.
+- **Dependency Status Panel**:
+  - Displays color-coded checklist (`✔ [Ready: ...]`, `⟳ [Downloading: XX.X%]`, `⟳ [Extracting...]`, `✖ [Failed: ...]`) for all dependencies.
 - **Interactive Quick-Start Guide**:
-  - Embedded right on the setup screen: explains URL insertion, list navigation, path configuration, history inspector, Vim toggle, and quitting.
+  - Embedded right on the start screen: explains URL insertion, list navigation, path configuration, history inspector, Vim toggle, and quitting.
   - Scrollable with `[↑]`/`[↓]`, `[j]`/`[k]`, and `PageUp`/`PageDown`.
-- **Explicit Launch Prompt**:
-  - Upon download completion, prompts: `[READY] All required tools are configured! Press [Enter] to launch Vidown >>`.
+- **Action Footer & Keybindings**:
+  - Upon readiness, clearly states: `Press [Enter] to Start  •  [?/F1] Full Keybindings Guide  •  [q] Quit`.
+  - Pressing `[Enter]` transitions to `CurrentScreen::Main`.
+  - Pressing `[?]` or `[F1]` opens the full-screen persistent Keybindings Guide modal overlay (`HelpModal`).
+  - Pressing `[q]` cleanly quits the application.
 - **Interactive Failure Recovery**:
   - If a download or extraction fails, allows:
     - `[r]` Retry downloads
@@ -40,7 +43,7 @@ We implemented an automated dependency bootstrapping system, a dedicated first-t
     - `[q]` Quit
 
 ### C. Persistent In-App Guide Modal (`src/ui.rs`, `src/events.rs`)
-- Pressing `?` or `F1` from anywhere in the main application opens a centered, scrollable **How to Use Vidown / Keybinding Guide** modal.
+- Pressing `?` or `F1` from anywhere (both the start screen and main application) opens a centered, scrollable **How to Use Vidown / Keybinding Guide** modal overlay.
 - Supports smooth scrolling via `[j]`/`[k]`, arrow keys, `PageUp`/`PageDown`, and `Home`.
 - Closes cleanly with `Esc`, `Enter`, `q`, or `?`/`F1`.
 
@@ -48,13 +51,13 @@ We implemented an automated dependency bootstrapping system, a dedicated first-t
 
 ## 2. Verification Results
 
-### A. Automated Test Suite (104 Tests)
+### A. Automated Test Suite (113 Tests)
 Ran full test suite under WSL Kali Linux:
 ```bash
 wsl bash -lc "cargo test"
 ```
-**Result**: All 104 unit and integration tests passed cleanly:
-- `tests/deps_tests.rs`: 24 tests (binary detection, download specs, recursive extraction, permissions, setup state machine, error recovery, help modal).
+**Result**: All 113 unit and integration tests passed cleanly:
+- `tests/deps_tests.rs`: 33 tests (binary detection, download specs, recursive extraction, permissions, setup state machine, error recovery, help modal, start screen always open, enter transitions, help modal overlay on start screen, narrow footer responsiveness, dynamic subtitles).
 - `tests/app_tests.rs`: 32 tests (model, modal exclusions, Vim scheme, sanitization).
 - `tests/ui_tests.rs`: 18 tests (buffer rendering, micro-terminals, layout).
 - `tests/history_tests.rs`: 14 tests (FIFO pruning, JSON persistence, file manager launching).

@@ -37,6 +37,12 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> Option<(usize, String)>
         return None;
     }
 
+    // If help modal is currently open, handle help modal keys (works on both Setup and Main screens)
+    if app.help_modal.is_some() {
+        handle_help_modal_key(app, key);
+        return None;
+    }
+
     // If on Setup screen, handle setup-specific keys
     if app.current_screen == crate::app::CurrentScreen::Setup {
         handle_setup_screen_key(app, key);
@@ -58,12 +64,6 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> Option<(usize, String)>
     // Global toggle for download directory modal (F3) - works in Normal and Editing modes
     if key.code == KeyCode::F(3) {
         app.toggle_path_modal();
-        return None;
-    }
-
-    // If help modal is currently open, handle help modal keys
-    if app.help_modal.is_some() {
-        handle_help_modal_key(app, key);
         return None;
     }
 
@@ -383,11 +383,21 @@ fn handle_path_modal_key(app: &mut App, key: KeyEvent) {
 
 /// Handles keys when the application is on the dependency setup / onboarding screen.
 fn handle_setup_screen_key(app: &mut App, key: KeyEvent) {
+    // Open full-screen persistent Keybindings Guide modal
+    if key.code == KeyCode::Char('?') || key.code == KeyCode::F(1) {
+        app.open_help_modal();
+        return;
+    }
+
     let phase = app.setup_state.as_ref().map(|s| s.phase.clone());
     match phase {
         Some(crate::app::SetupPhase::Complete) => {
             if key.code == KeyCode::Enter {
                 app.finish_setup();
+                return;
+            }
+            if key.code == KeyCode::Char('q') || key.code == KeyCode::Char('Q') {
+                app.should_quit = true;
                 return;
             }
         }

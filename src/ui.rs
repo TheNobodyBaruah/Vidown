@@ -14,6 +14,9 @@ pub fn render(f: &mut Frame, app: &App) {
     match app.current_screen {
         crate::app::CurrentScreen::Setup => {
             render_setup_screen(f, app);
+            if let Some(help_modal) = &app.help_modal {
+                render_help_modal(f, help_modal);
+            }
         }
         crate::app::CurrentScreen::Main => {
             render_main_screen(f, app);
@@ -997,15 +1000,25 @@ pub fn render_setup_screen(f: &mut Frame, app: &App) {
         ])
         .split(area);
 
-    render_setup_banner(f, chunks[0], is_compact);
+    let is_ready = app
+        .setup_state
+        .as_ref()
+        .is_some_and(|s| s.phase == crate::app::SetupPhase::Complete);
+
+    render_setup_banner(f, chunks[0], is_compact, is_ready);
     render_setup_tools(f, app, chunks[1]);
     render_setup_guide(f, app, chunks[2]);
     render_setup_footer(f, app, chunks[3]);
 }
 
 /// Renders the ASCII logo banner or a compact header at the top of the setup screen.
-fn render_setup_banner(f: &mut Frame, area: Rect, is_compact: bool) {
+fn render_setup_banner(f: &mut Frame, area: Rect, is_compact: bool, is_ready: bool) {
     if is_compact {
+        let subtitle = if is_ready {
+            "  Vidown Start Screen & Quick Start Guide"
+        } else {
+            "  Dependency Setup & Quick Start Guide"
+        };
         let block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan));
@@ -1018,7 +1031,7 @@ fn render_setup_banner(f: &mut Frame, area: Rect, is_compact: bool) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "  Dependency Setup & Quick Start Guide",
+                subtitle,
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
@@ -1028,6 +1041,11 @@ fn render_setup_banner(f: &mut Frame, area: Rect, is_compact: bool) {
         .block(block);
         f.render_widget(p, area);
     } else {
+        let (subtitle_text, subtitle_color) = if is_ready {
+            ("Welcome & Quick Start Guide", Color::Green)
+        } else {
+            ("First-Time Setup & Onboarding", Color::Yellow)
+        };
         let banner_lines = vec![
             Line::from(Span::styled(
                 r#" __      ___     _                     "#,
@@ -1074,8 +1092,8 @@ fn render_setup_banner(f: &mut Frame, area: Rect, is_compact: bool) {
                 ),
                 Span::styled("  •  ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
-                    "First-Time Setup & Onboarding",
-                    Style::default().fg(Color::Yellow),
+                    subtitle_text,
+                    Style::default().fg(subtitle_color),
                 ),
             ]),
         ];
@@ -1121,7 +1139,7 @@ fn render_setup_tools(f: &mut Frame, app: &App, area: Rect) {
                 Style::default()
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
-                "[Installed in local data bin]".to_string(),
+                "[Ready: Installed in local data bin]".to_string(),
                 Style::default()
                     .fg(Color::Green)
                     .add_modifier(Modifier::BOLD),
@@ -1275,7 +1293,7 @@ fn render_setup_guide(f: &mut Frame, app: &App, area: Rect) {
                     .fg(Color::LightYellow)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::raw("Press [?] or [F1] from the main screen at any time to reopen this guide."),
+            Span::raw("Press [?] or [F1] anytime to open the full Keybindings Guide modal."),
         ]),
         Line::from(vec![
             Span::styled(
@@ -1302,27 +1320,97 @@ fn render_setup_footer(f: &mut Frame, app: &App, area: Rect) {
         None => return,
     };
 
+    let (block_title, border_color) = match &setup.phase {
+        crate::app::SetupPhase::Complete => (" Press [Enter] to launch Vidown ", Color::DarkGray),
+        crate::app::SetupPhase::Error(_) => (" Setup Error ", Color::Red),
+        _ => (" Installing Dependencies ", Color::Yellow),
+    };
+
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::DarkGray));
+        .border_style(Style::default().fg(border_color))
+        .title(block_title);
 
     let content_line = match &setup.phase {
-        crate::app::SetupPhase::Complete => Line::from(vec![
-            Span::styled(
-                " [READY] ",
-                Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(" All required tools are configured! "),
-            Span::styled(
-                "Press [Enter] to launch Vidown >>",
-                Style::default()
-                    .fg(Color::Green)
-                    .add_modifier(Modifier::BOLD),
-            ),
-        ]),
+        crate::app::SetupPhase::Complete => {
+            if area.width < 55 {
+                Line::from(vec![
+                    Span::styled(
+                        "[READY] ",
+                        Style::default()
+                            .fg(Color::White)
+                            .bg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "[Enter] Start  •  [q] Quit",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ])
+            } else if area.width < 79 {
+                Line::from(vec![
+                    Span::styled(
+                        "[READY] ",
+                        Style::default()
+                            .fg(Color::White)
+                            .bg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "[Enter] Start",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("  •  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        "[?/F1] Guide",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("  •  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        "[q] Quit",
+                        Style::default()
+                            .fg(Color::Red)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ])
+            } else {
+                Line::from(vec![
+                    Span::styled(
+                        "[READY] ",
+                        Style::default()
+                            .fg(Color::White)
+                            .bg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        "Press [Enter] to Start",
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("  •  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        "[?/F1] Full Keybindings Guide",
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("  •  ", Style::default().fg(Color::DarkGray)),
+                    Span::styled(
+                        "[q] Quit",
+                        Style::default()
+                            .fg(Color::Red)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                ])
+            }
+        }
         crate::app::SetupPhase::Error(msg) => Line::from(vec![
             Span::styled(
                 " [ERROR] ",
