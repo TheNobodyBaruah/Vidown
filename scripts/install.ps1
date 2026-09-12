@@ -85,6 +85,36 @@ try {
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 }
 
+# Defense-in-depth check for VCRUNTIME140.dll
+$systemRoot = if ($env:SystemRoot) { $env:SystemRoot } elseif ($env:windir) { $env:windir } else { "C:\Windows" }
+$vcRuntimeDll = if ($env:VIDOWN_TEST_VCRUNTIME_DLL) { $env:VIDOWN_TEST_VCRUNTIME_DLL } else { "$systemRoot\System32\vcruntime140.dll" }
+if (-not (Test-Path $vcRuntimeDll)) {
+    Write-Host "==> Visual C++ runtime (vcruntime140.dll) not found. Installing Visual C++ 2015-2022 Redistributable..." -ForegroundColor Yellow
+    $vcRedistUrl = if ($env:VIDOWN_VCREDIST_URL) { $env:VIDOWN_VCREDIST_URL } else { "https://aka.ms/vs/17/release/vc_redist.x64.exe" }
+    $tempVcRedist = Join-Path $env:TEMP ("vc_redist.x64-" + [System.Guid]::NewGuid().ToString() + ".exe")
+    try {
+        Write-Host "==> Downloading Visual C++ 2015-2022 Redistributable ($vcRedistUrl)..." -ForegroundColor Cyan
+        Invoke-WebRequest -Uri $vcRedistUrl -OutFile $tempVcRedist -UseBasicParsing
+
+        Write-Host "==> Installing Visual C++ 2015-2022 Redistributable silently..." -ForegroundColor Cyan
+        $vcProc = Start-Process -FilePath $tempVcRedist -ArgumentList "/quiet", "/norestart" -Wait -PassThru
+        if ($vcProc) {
+            $vcProc.WaitForExit()
+            if ($vcProc.ExitCode -eq 0 -or $vcProc.ExitCode -eq 3010 -or $vcProc.ExitCode -eq 1638) {
+                Write-Host "Visual C++ Redistributable installed successfully." -ForegroundColor Green
+            } else {
+                Write-Warning "Visual C++ Redistributable installer returned exit code $($vcProc.ExitCode)."
+            }
+        }
+    } catch {
+        Write-Warning "Failed to install Visual C++ Redistributable automatically: $_"
+    } finally {
+        if (Test-Path $tempVcRedist) {
+            Remove-Item -Path $tempVcRedist -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 $ApiUrl = if ($env:VIDOWN_API_URL) { $env:VIDOWN_API_URL } else { "https://api.github.com/repos/$Repo/releases/latest" }
 Write-Host "==> Fetching latest release information from GitHub ($ApiUrl)..." -ForegroundColor Cyan
 
