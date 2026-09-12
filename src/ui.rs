@@ -127,11 +127,11 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
     let (border_color, title_text) = match app.input_mode {
         InputMode::Editing => (
             Color::Green,
-            " URL Input (Editing - Press [Enter] to download, [Esc] to cancel) ",
+            " URL Input (Editing - Press [Enter] to download, [Ctrl+V] paste, [Esc] to cancel) ",
         ),
         InputMode::Normal => (
             Color::DarkGray,
-            " URL Input (Normal - Press [i] or [Enter] to edit) ",
+            " URL Input (Normal - Press [i] or [Ctrl+V] / Right-Click to paste URL) ",
         ),
     };
 
@@ -142,7 +142,7 @@ fn render_input(f: &mut Frame, app: &App, area: Rect) {
 
     let input_text = if app.input_buffer.is_empty() && app.input_mode == InputMode::Normal {
         Paragraph::new(Span::styled(
-            "Paste or type video URL here (press 'i' to edit)...",
+            "Paste [Ctrl+V / Right-Click] or type video URL here (press 'i' to edit)...",
             Style::default().fg(Color::DarkGray),
         ))
     } else {
@@ -993,10 +993,10 @@ pub fn render_setup_screen(f: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(logo_height), // ASCII banner / Header
+            Constraint::Length(logo_height),  // ASCII banner / Header
             Constraint::Length(tools_height), // Dependency Status Panel
-            Constraint::Min(6),              // Quick Start & Keybindings Guide
-            Constraint::Length(3),           // Footer instructions / actions
+            Constraint::Min(6),               // Quick Start & Keybindings Guide
+            Constraint::Length(3),            // Footer instructions / actions
         ])
         .split(area);
 
@@ -1091,10 +1091,7 @@ fn render_setup_banner(f: &mut Frame, area: Rect, is_compact: bool, is_ready: bo
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::styled("  •  ", Style::default().fg(Color::DarkGray)),
-                Span::styled(
-                    subtitle_text,
-                    Style::default().fg(subtitle_color),
-                ),
+                Span::styled(subtitle_text, Style::default().fg(subtitle_color)),
             ]),
         ];
         let p = Paragraph::new(banner_lines).alignment(Alignment::Center);
@@ -1172,13 +1169,9 @@ fn render_setup_tools(f: &mut Frame, app: &App, area: Rect) {
             ),
             crate::deps::ToolSetupStatus::Failed(err) => (
                 " ✖ ",
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                 format!("[Failed: {}]", err),
-                Style::default()
-                    .fg(Color::Red)
-                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
             ),
             crate::deps::ToolSetupStatus::Checking => (
                 " … ",
@@ -1207,11 +1200,7 @@ fn render_setup_tools(f: &mut Frame, app: &App, area: Rect) {
 
 /// Renders the Quick Start / How to Use guide on the setup screen.
 fn render_setup_guide(f: &mut Frame, app: &App, area: Rect) {
-    let scroll_offset = app
-        .setup_state
-        .as_ref()
-        .map(|s| s.help_scroll)
-        .unwrap_or(0);
+    let scroll_offset = app.setup_state.as_ref().map(|s| s.help_scroll).unwrap_or(0);
 
     let title = if scroll_offset > 0 {
         format!(
@@ -1239,7 +1228,7 @@ fn render_setup_guide(f: &mut Frame, app: &App, area: Rect) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw(
-                "Press [i] or [Enter] to enter URL editing mode. Type or paste your video link, then press [Enter] to start downloading.",
+                "Press [i] or [Enter] to enter URL editing mode. Paste with [Ctrl+V] or Right-Click, then press [Enter] to start downloading.",
             ),
         ]),
         Line::from(vec![
@@ -1374,9 +1363,7 @@ fn render_setup_footer(f: &mut Frame, app: &App, area: Rect) {
                     Span::styled("  •  ", Style::default().fg(Color::DarkGray)),
                     Span::styled(
                         "[q] Quit",
-                        Style::default()
-                            .fg(Color::Red)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                     ),
                 ])
             } else {
@@ -1404,9 +1391,7 @@ fn render_setup_footer(f: &mut Frame, app: &App, area: Rect) {
                     Span::styled("  •  ", Style::default().fg(Color::DarkGray)),
                     Span::styled(
                         "[q] Quit",
-                        Style::default()
-                            .fg(Color::Red)
-                            .add_modifier(Modifier::BOLD),
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
                     ),
                 ])
             }
@@ -1510,6 +1495,15 @@ pub fn render_help_modal(f: &mut Frame, modal: &crate::app::HelpModal) {
                     .add_modifier(Modifier::BOLD),
             ),
             Span::raw("Enter Editing mode. Paste or type your target video URL."),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "   • [Ctrl+V] / Right-Click: ",
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("Paste copied URL directly from system clipboard."),
         ]),
         Line::from(vec![
             Span::styled(

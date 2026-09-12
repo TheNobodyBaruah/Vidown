@@ -19,7 +19,12 @@ static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn create_temp_test_dir(label: &str) -> PathBuf {
     let id = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let p = std::env::temp_dir().join(format!("vidown_deps_test_{}_{}_{}", label, std::process::id(), id));
+    let p = std::env::temp_dir().join(format!(
+        "vidown_deps_test_{}_{}_{}",
+        label,
+        std::process::id(),
+        id
+    ));
     let _ = std::fs::remove_dir_all(&p);
     std::fs::create_dir_all(&p).unwrap();
     p
@@ -187,16 +192,28 @@ fn test_get_download_specs_validity() {
     let specs = get_download_specs();
     assert_eq!(specs.len(), 3);
 
-    let yt_spec = specs.iter().find(|s| s.tool == RequiredTool::YtDlp).unwrap();
+    let yt_spec = specs
+        .iter()
+        .find(|s| s.tool == RequiredTool::YtDlp)
+        .unwrap();
     assert!(!yt_spec.urls.is_empty());
     assert!(yt_spec.urls[0].contains("github.com/yt-dlp/yt-dlp"));
     assert!(!yt_spec.is_archive);
 
-    let ffmpeg_spec = specs.iter().find(|s| s.tool == RequiredTool::Ffmpeg).unwrap();
+    let ffmpeg_spec = specs
+        .iter()
+        .find(|s| s.tool == RequiredTool::Ffmpeg)
+        .unwrap();
     assert!(!ffmpeg_spec.urls.is_empty());
     assert!(ffmpeg_spec.is_archive);
-    assert!(ffmpeg_spec.target_binaries.contains(&"ffmpeg") || ffmpeg_spec.target_binaries.contains(&"ffmpeg.exe"));
-    assert!(ffmpeg_spec.target_binaries.contains(&"ffprobe") || ffmpeg_spec.target_binaries.contains(&"ffprobe.exe"));
+    assert!(
+        ffmpeg_spec.target_binaries.contains(&"ffmpeg")
+            || ffmpeg_spec.target_binaries.contains(&"ffmpeg.exe")
+    );
+    assert!(
+        ffmpeg_spec.target_binaries.contains(&"ffprobe")
+            || ffmpeg_spec.target_binaries.contains(&"ffprobe.exe")
+    );
 
     let node_spec = specs.iter().find(|s| s.tool == RequiredTool::Node).unwrap();
     assert!(!node_spec.urls.is_empty());
@@ -226,8 +243,14 @@ fn test_find_file_recursive_nested() {
 fn test_setup_state_machine_transitions() {
     let tools = vec![
         (RequiredTool::YtDlp, ToolLocation::Missing),
-        (RequiredTool::Ffmpeg, ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg"))),
-        (RequiredTool::Node, ToolLocation::LocalBin(PathBuf::from("/home/user/.local/share/vidown/bin/node"))),
+        (
+            RequiredTool::Ffmpeg,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg")),
+        ),
+        (
+            RequiredTool::Node,
+            ToolLocation::LocalBin(PathBuf::from("/home/user/.local/share/vidown/bin/node")),
+        ),
     ];
 
     let state = SetupState::new(tools);
@@ -246,7 +269,14 @@ fn test_setup_state_machine_transitions() {
         percent: 45.5,
     });
 
-    let item = app.setup_state.as_ref().unwrap().tools.iter().find(|t| t.id == "yt-dlp").unwrap();
+    let item = app
+        .setup_state
+        .as_ref()
+        .unwrap()
+        .tools
+        .iter()
+        .find(|t| t.id == "yt-dlp")
+        .unwrap();
     assert_eq!(item.status, ToolSetupStatus::Downloading { percent: 45.5 });
 
     // Installed event
@@ -254,12 +284,22 @@ fn test_setup_state_machine_transitions() {
         tool: "yt-dlp",
         status: ToolSetupStatus::Installed,
     });
-    let item = app.setup_state.as_ref().unwrap().tools.iter().find(|t| t.id == "yt-dlp").unwrap();
+    let item = app
+        .setup_state
+        .as_ref()
+        .unwrap()
+        .tools
+        .iter()
+        .find(|t| t.id == "yt-dlp")
+        .unwrap();
     assert_eq!(item.status, ToolSetupStatus::Installed);
 
     // Complete event
     app.handle_setup_event(SetupEvent::Complete);
-    assert_eq!(app.setup_state.as_ref().unwrap().phase, SetupPhase::Complete);
+    assert_eq!(
+        app.setup_state.as_ref().unwrap().phase,
+        SetupPhase::Complete
+    );
 
     // Press Enter to finish setup and launch main screen
     handle_key_event(&mut app, press_key(KeyCode::Enter));
@@ -284,7 +324,10 @@ fn test_setup_error_handling_retry_continue_quit() {
     // Test 'r' for retry
     handle_key_event(&mut app, press_char('r'));
     assert!(app.take_setup_retry());
-    assert_eq!(app.setup_state.as_ref().unwrap().phase, SetupPhase::Downloading);
+    assert_eq!(
+        app.setup_state.as_ref().unwrap().phase,
+        SetupPhase::Downloading
+    );
 
     // Put into error again
     app.handle_setup_event(SetupEvent::Error {
@@ -297,7 +340,10 @@ fn test_setup_error_handling_retry_continue_quit() {
     assert_eq!(app.current_screen, CurrentScreen::Main);
 
     // Put into error again
-    let mut app_quit = App::new_with_setup(SetupState::new(vec![(RequiredTool::YtDlp, ToolLocation::Missing)]));
+    let mut app_quit = App::new_with_setup(SetupState::new(vec![(
+        RequiredTool::YtDlp,
+        ToolLocation::Missing,
+    )]));
     app_quit.handle_setup_event(SetupEvent::Error {
         tool: "yt-dlp",
         error: "Fatal error".to_string(),
@@ -399,8 +445,14 @@ fn test_render_setup_screen_with_test_backend() {
 
     let tools = vec![
         (RequiredTool::YtDlp, ToolLocation::Missing),
-        (RequiredTool::Ffmpeg, ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg"))),
-        (RequiredTool::Node, ToolLocation::LocalBin(PathBuf::from("node.exe"))),
+        (
+            RequiredTool::Ffmpeg,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg")),
+        ),
+        (
+            RequiredTool::Node,
+            ToolLocation::LocalBin(PathBuf::from("node.exe")),
+        ),
     ];
     let mut state = SetupState::new(tools);
     state.phase = SetupPhase::Downloading;
@@ -425,7 +477,10 @@ fn test_render_setup_screen_with_test_backend() {
     assert!(buffer_str.contains("ffmpeg"));
     assert!(buffer_str.contains("node"));
     assert!(buffer_str.contains("Quick Start"));
-    assert!(buffer_str.contains("Downloading & verifying dependencies") || buffer_str.contains("WORKING"));
+    assert!(
+        buffer_str.contains("Downloading & verifying dependencies")
+            || buffer_str.contains("WORKING")
+    );
 }
 
 #[test]
@@ -434,7 +489,10 @@ fn test_render_setup_screen_complete_and_error_states() {
     let mut terminal = Terminal::new(backend).unwrap();
 
     // 1. Complete state
-    let mut state_complete = SetupState::new(vec![(RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("yt-dlp")))]);
+    let mut state_complete = SetupState::new(vec![(
+        RequiredTool::YtDlp,
+        ToolLocation::SystemPath(PathBuf::from("yt-dlp")),
+    )]);
     state_complete.phase = SetupPhase::Complete;
     let app_complete = App::new_with_setup(state_complete);
 
@@ -442,7 +500,9 @@ fn test_render_setup_screen_complete_and_error_states() {
     let buffer = terminal.backend().buffer();
     let buffer_str: String = (0..buffer.area.height)
         .map(|y| {
-            let line: String = (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect();
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
             format!("{}\n", line)
         })
         .collect();
@@ -458,7 +518,9 @@ fn test_render_setup_screen_complete_and_error_states() {
     let buffer2 = terminal.backend().buffer();
     let buffer2_str: String = (0..buffer2.area.height)
         .map(|y| {
-            let line: String = (0..buffer2.area.width).map(|x| buffer2[(x, y)].symbol()).collect();
+            let line: String = (0..buffer2.area.width)
+                .map(|x| buffer2[(x, y)].symbol())
+                .collect();
             format!("{}\n", line)
         })
         .collect();
@@ -481,7 +543,9 @@ fn test_render_persistent_help_modal_on_main_screen() {
     let buffer = terminal.backend().buffer();
     let buffer_str: String = (0..buffer.area.height)
         .map(|y| {
-            let line: String = (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect();
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
             format!("{}\n", line)
         })
         .collect();
@@ -619,7 +683,10 @@ fn test_app_new_with_test_deps_flag() {
 
     let app = App::new();
     // App should have evaluated dependencies and either be in Setup or Main
-    assert!(matches!(app.current_screen, CurrentScreen::Setup | CurrentScreen::Main));
+    assert!(matches!(
+        app.current_screen,
+        CurrentScreen::Setup | CurrentScreen::Main
+    ));
 
     unsafe {
         std::env::remove_var("VIDOWN_TEST_DEPS");
@@ -659,7 +726,10 @@ fn test_setup_lifecycle_partial_failure() {
         error: "Network timeout".to_string(),
     });
 
-    assert!(matches!(app.setup_state.as_ref().unwrap().phase, SetupPhase::Error(_)));
+    assert!(matches!(
+        app.setup_state.as_ref().unwrap().phase,
+        SetupPhase::Error(_)
+    ));
 
     // On retry, only failed tools reset to PendingDownload
     app.retry_setup();
@@ -740,9 +810,18 @@ fn test_setup_lifecycle_multiple_consecutive_failures() {
 #[test]
 fn test_start_screen_always_opens_when_deps_complete() {
     let tools = vec![
-        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
-        (RequiredTool::Ffmpeg, ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg"))),
-        (RequiredTool::Node, ToolLocation::SystemPath(PathBuf::from("/usr/bin/node"))),
+        (
+            RequiredTool::YtDlp,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp")),
+        ),
+        (
+            RequiredTool::Ffmpeg,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg")),
+        ),
+        (
+            RequiredTool::Node,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/node")),
+        ),
     ];
     let state = SetupState::new(tools);
     assert_eq!(state.phase, SetupPhase::Complete);
@@ -760,7 +839,9 @@ fn test_start_screen_always_opens_when_deps_complete() {
     let buffer = terminal.backend().buffer();
     let buffer_str: String = (0..buffer.area.height)
         .map(|y| {
-            let line: String = (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect();
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
             format!("{}\n", line)
         })
         .collect();
@@ -769,15 +850,27 @@ fn test_start_screen_always_opens_when_deps_complete() {
     assert!(buffer_str.contains("Required Tools"));
     assert!(buffer_str.contains("Ready:"));
     assert!(buffer_str.contains("Quick Start & Keybinding Guide"));
-    assert!(buffer_str.contains("Press [Enter] to Start  •  [?/F1] Full Keybindings Guide  •  [q] Quit"));
+    assert!(
+        buffer_str
+            .contains("Press [Enter] to Start  •  [?/F1] Full Keybindings Guide  •  [q] Quit")
+    );
 }
 
 #[test]
 fn test_start_screen_enter_key_transitions_to_main() {
     let tools = vec![
-        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
-        (RequiredTool::Ffmpeg, ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg"))),
-        (RequiredTool::Node, ToolLocation::SystemPath(PathBuf::from("/usr/bin/node"))),
+        (
+            RequiredTool::YtDlp,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp")),
+        ),
+        (
+            RequiredTool::Ffmpeg,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg")),
+        ),
+        (
+            RequiredTool::Node,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/node")),
+        ),
     ];
     let state = SetupState::new(tools);
     let mut app = App::new_with_setup(state);
@@ -786,15 +879,29 @@ fn test_start_screen_enter_key_transitions_to_main() {
     // Press Enter to transition to Main screen
     handle_key_event(&mut app, press_key(KeyCode::Enter));
     assert_eq!(app.current_screen, CurrentScreen::Main);
-    assert!(app.status_message.as_ref().unwrap().contains("Ready. Press [i]"));
+    assert!(
+        app.status_message
+            .as_ref()
+            .unwrap()
+            .contains("Ready. Press [i]")
+    );
 }
 
 #[test]
 fn test_start_screen_help_modal_and_scrolling() {
     let tools = vec![
-        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
-        (RequiredTool::Ffmpeg, ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg"))),
-        (RequiredTool::Node, ToolLocation::SystemPath(PathBuf::from("/usr/bin/node"))),
+        (
+            RequiredTool::YtDlp,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp")),
+        ),
+        (
+            RequiredTool::Ffmpeg,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg")),
+        ),
+        (
+            RequiredTool::Node,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/node")),
+        ),
     ];
     let state = SetupState::new(tools);
     let mut app = App::new_with_setup(state);
@@ -843,9 +950,18 @@ fn test_start_screen_help_modal_and_scrolling() {
 #[test]
 fn test_start_screen_quit_with_q() {
     let tools = vec![
-        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
-        (RequiredTool::Ffmpeg, ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg"))),
-        (RequiredTool::Node, ToolLocation::SystemPath(PathBuf::from("/usr/bin/node"))),
+        (
+            RequiredTool::YtDlp,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp")),
+        ),
+        (
+            RequiredTool::Ffmpeg,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg")),
+        ),
+        (
+            RequiredTool::Node,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/node")),
+        ),
     ];
     let state = SetupState::new(tools);
     let mut app = App::new_with_setup(state);
@@ -858,9 +974,10 @@ fn test_start_screen_quit_with_q() {
 
 #[test]
 fn test_start_screen_help_modal_overlay_rendering() {
-    let tools = vec![
-        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
-    ];
+    let tools = vec![(
+        RequiredTool::YtDlp,
+        ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp")),
+    )];
     let state = SetupState::new(tools);
     let mut app = App::new_with_setup(state);
     app.open_help_modal();
@@ -871,7 +988,9 @@ fn test_start_screen_help_modal_overlay_rendering() {
     let buffer = terminal.backend().buffer();
     let buffer_str: String = (0..buffer.area.height)
         .map(|y| {
-            let line: String = (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect();
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
             format!("{}\n", line)
         })
         .collect();
@@ -900,9 +1019,18 @@ fn test_app_new_with_test_deps_starts_on_setup_screen() {
 #[test]
 fn test_start_screen_welcome_subtitle_when_ready() {
     let tools = vec![
-        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
-        (RequiredTool::Ffmpeg, ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg"))),
-        (RequiredTool::Node, ToolLocation::SystemPath(PathBuf::from("/usr/bin/node"))),
+        (
+            RequiredTool::YtDlp,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp")),
+        ),
+        (
+            RequiredTool::Ffmpeg,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/ffmpeg")),
+        ),
+        (
+            RequiredTool::Node,
+            ToolLocation::SystemPath(PathBuf::from("/usr/bin/node")),
+        ),
     ];
     let state = SetupState::new(tools);
     let app = App::new_with_setup(state);
@@ -914,7 +1042,9 @@ fn test_start_screen_welcome_subtitle_when_ready() {
     let buffer = terminal.backend().buffer();
     let buffer_str: String = (0..buffer.area.height)
         .map(|y| {
-            let line: String = (0..buffer.area.width).map(|x| buffer[(x, y)].symbol()).collect();
+            let line: String = (0..buffer.area.width)
+                .map(|x| buffer[(x, y)].symbol())
+                .collect();
             format!("{}\n", line)
         })
         .collect();
@@ -929,7 +1059,9 @@ fn test_start_screen_welcome_subtitle_when_ready() {
     let buffer_compact = terminal_compact.backend().buffer();
     let buffer_compact_str: String = (0..buffer_compact.area.height)
         .map(|y| {
-            let line: String = (0..buffer_compact.area.width).map(|x| buffer_compact[(x, y)].symbol()).collect();
+            let line: String = (0..buffer_compact.area.width)
+                .map(|x| buffer_compact[(x, y)].symbol())
+                .collect();
             format!("{}\n", line)
         })
         .collect();
@@ -939,9 +1071,10 @@ fn test_start_screen_welcome_subtitle_when_ready() {
 
 #[test]
 fn test_start_screen_narrow_footer_adaptive_rendering() {
-    let tools = vec![
-        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
-    ];
+    let tools = vec![(
+        RequiredTool::YtDlp,
+        ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp")),
+    )];
     let state = SetupState::new(tools);
     let app = App::new_with_setup(state);
 
@@ -952,7 +1085,9 @@ fn test_start_screen_narrow_footer_adaptive_rendering() {
     let buffer_65 = terminal_65.backend().buffer();
     let str_65: String = (0..buffer_65.area.height)
         .map(|y| {
-            let line: String = (0..buffer_65.area.width).map(|x| buffer_65[(x, y)].symbol()).collect();
+            let line: String = (0..buffer_65.area.width)
+                .map(|x| buffer_65[(x, y)].symbol())
+                .collect();
             format!("{}\n", line)
         })
         .collect();
@@ -967,7 +1102,9 @@ fn test_start_screen_narrow_footer_adaptive_rendering() {
     let buffer_45 = terminal_45.backend().buffer();
     let str_45: String = (0..buffer_45.area.height)
         .map(|y| {
-            let line: String = (0..buffer_45.area.width).map(|x| buffer_45[(x, y)].symbol()).collect();
+            let line: String = (0..buffer_45.area.width)
+                .map(|x| buffer_45[(x, y)].symbol())
+                .collect();
             format!("{}\n", line)
         })
         .collect();
@@ -976,9 +1113,10 @@ fn test_start_screen_narrow_footer_adaptive_rendering() {
 
 #[test]
 fn test_start_screen_help_modal_esc_and_q_dismissal() {
-    let tools = vec![
-        (RequiredTool::YtDlp, ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp"))),
-    ];
+    let tools = vec![(
+        RequiredTool::YtDlp,
+        ToolLocation::SystemPath(PathBuf::from("/usr/bin/yt-dlp")),
+    )];
     let state = SetupState::new(tools);
     let mut app = App::new_with_setup(state);
 
@@ -1011,6 +1149,3 @@ fn test_start_screen_help_modal_esc_and_q_dismissal() {
     assert!(app.help_modal.is_none());
     assert_eq!(app.current_screen, CurrentScreen::Setup);
 }
-
-
-

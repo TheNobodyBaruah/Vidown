@@ -104,33 +104,66 @@ pub async fn perform_download(
     output_dir: PathBuf,
     tx: mpsc::Sender<DownloadEvent>,
 ) {
-    // Ensure target output directory exists
-    if let Err(e) = tokio::fs::create_dir_all(&output_dir).await {
+    // Ensure target output directory exists, falling back safely if permissions fail (e.g. C:\Windows\System32)
+    let mut final_output_dir = output_dir.clone();
+    if let Err(e) = tokio::fs::create_dir_all(&final_output_dir).await {
+        let fallback_dir = crate::config::get_safe_fallback_dir();
         let _ = tx
-            .send(DownloadEvent::Error {
+            .send(DownloadEvent::Log {
                 id,
-                error: format!("Failed to create output directory: {}", e),
+                message: format!(
+                    "Warning: Could not create output dir '{}' ({}). Falling back to '{}'.",
+                    final_output_dir.display(),
+                    e,
+                    fallback_dir.display()
+                ),
             })
             .await;
-        return;
+        if let Err(e2) = tokio::fs::create_dir_all(&fallback_dir).await {
+            let _ = tx
+                .send(DownloadEvent::Error {
+                    id,
+                    error: format!(
+                        "Failed to create output directory '{}' and fallback '{}': {}",
+                        final_output_dir.display(),
+                        fallback_dir.display(),
+                        e2
+                    ),
+                })
+                .await;
+            return;
+        }
+        final_output_dir = fallback_dir;
     }
 
-    let output_template = output_dir.join("%(title)s.%(ext)s");
+    let output_template = final_output_dir.join("%(title)s.%(ext)s");
     let output_str = output_template.to_string_lossy().to_string();
 
     let yt_dlp_bin = crate::deps::resolve_binary("yt-dlp");
     let mut cmd = Command::new(yt_dlp_bin);
+    // Explicitly set child process working directory to output directory
+    cmd.current_dir(&final_output_dir);
     crate::deps::inject_bin_to_command(&mut cmd);
 
-    // Conditionally include --js-runtime node with graceful fallback
-    if is_node_available() {
-        cmd.arg("--js-runtime").arg("node");
+    // Direct ffmpeg location if discovered (bypasses Windows PATH lookup issues)
+    if let Some(ffmpeg_loc) = crate::deps::get_ffmpeg_location() {
+        cmd.arg("--ffmpeg-location").arg(ffmpeg_loc);
+    }
+
+    // Conditionally include --js-runtimes node with exact path or graceful fallback
+    if let Some(node_path) =
+        crate::deps::find_in_user_bin("node").or_else(|| crate::deps::find_in_path("node"))
+    {
+        cmd.arg("--js-runtimes")
+            .arg(format!("node:{}", node_path.display()));
+    } else if is_node_available() {
+        cmd.arg("--js-runtimes").arg("node");
     }
 
     cmd.arg("--force-overwrites")
         .arg("--newline")
         .arg("-f")
-        .arg("bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/best[ext=mp4]/best")
+        .arg("bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best")
         .arg("--merge-output-format")
         .arg("mp4")
         .arg("-o")
@@ -171,6 +204,7 @@ pub async fn perform_download(
         captured_errors
     });
 
+    let mut captured_stdout: Vec<String> = Vec::new();
     if let Some(out_stream) = stdout {
         let mut reader = BufReader::new(out_stream).lines();
         let mut current_track: u8 = 0;
@@ -178,6 +212,10 @@ pub async fn perform_download(
         let mut last_emitted_percent: f64 = -1.0;
 
         while let Ok(Some(line)) = reader.next_line().await {
+            captured_stdout.push(line.clone());
+            if captured_stdout.len() > 50 {
+                captured_stdout.remove(0);
+            }
             // Forward stdout lines to logs
             let _ = tx
                 .send(DownloadEvent::Log {
@@ -264,7 +302,26 @@ pub async fn perform_download(
         let error_summary = if !stderr_lines.is_empty() {
             stderr_lines.join(" | ")
         } else {
-            format!("yt-dlp process exited with status: {}", status)
+            let error_line = captured_stdout
+                .iter()
+                .rev()
+                .find(|l| l.contains("ERROR:") || l.contains("error:"));
+            if let Some(err) = error_line {
+                err.clone()
+            } else if !captured_stdout.is_empty() {
+                captured_stdout
+                    .iter()
+                    .rev()
+                    .take(3)
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                    .collect::<Vec<_>>()
+                    .join(" | ")
+            } else {
+                format!("yt-dlp process exited with status: {}", status)
+            }
         };
         let _ = tx
             .send(DownloadEvent::Error {

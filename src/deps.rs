@@ -22,7 +22,11 @@ pub enum RequiredTool {
 
 impl RequiredTool {
     pub fn all() -> &'static [RequiredTool] {
-        &[RequiredTool::YtDlp, RequiredTool::Ffmpeg, RequiredTool::Node]
+        &[
+            RequiredTool::YtDlp,
+            RequiredTool::Ffmpeg,
+            RequiredTool::Node,
+        ]
     }
 
     pub fn id(&self) -> &'static str {
@@ -267,19 +271,31 @@ pub fn resolve_binary(bin_name: &str) -> PathBuf {
     }
 }
 
+/// Returns the directory containing the ffmpeg and ffprobe binaries if available.
+pub fn get_ffmpeg_location() -> Option<PathBuf> {
+    if let Some(path) = find_in_user_bin("ffmpeg") {
+        return path.parent().map(|p| p.to_path_buf()).or(Some(path));
+    }
+    if let Some(path) = find_in_path("ffmpeg") {
+        return path.parent().map(|p| p.to_path_buf()).or(Some(path));
+    }
+    None
+}
+
 /// Prepends Vidown's local user data bin directory to the `PATH` environment variable
 /// of a `tokio::process::Command`. This ensures child processes (like `yt-dlp`) automatically
 /// find companion tools (`ffmpeg`, `ffprobe`, `node`) located in the local user data directory.
 pub fn inject_bin_to_command(cmd: &mut Command) {
     let bin_dir = get_user_bin_dir();
-    if let Some(old_path) = std::env::var_os("PATH") {
-        let mut paths = vec![bin_dir];
-        paths.extend(std::env::split_paths(&old_path));
-        if let Ok(new_path) = std::env::join_paths(paths) {
-            cmd.env("PATH", new_path);
-        }
-    } else {
-        cmd.env("PATH", bin_dir);
+    let old_path = std::env::var_os("PATH").or_else(|| std::env::var_os("Path"));
+    let mut paths = vec![bin_dir];
+    if let Some(old) = old_path {
+        paths.extend(std::env::split_paths(&old));
+    }
+    if let Ok(new_path) = std::env::join_paths(paths) {
+        cmd.env("PATH", &new_path);
+        #[cfg(target_os = "windows")]
+        cmd.env("Path", &new_path);
     }
 }
 
@@ -301,9 +317,7 @@ pub fn get_download_specs() -> Vec<ToolDownloadSpec> {
         "windows" => vec![
             ToolDownloadSpec {
                 tool: RequiredTool::YtDlp,
-                urls: vec![
-                    "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe",
-                ],
+                urls: vec!["https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe"],
                 is_archive: false,
                 archive_format: None,
                 target_binaries: vec!["yt-dlp.exe"],
@@ -321,9 +335,7 @@ pub fn get_download_specs() -> Vec<ToolDownloadSpec> {
             },
             ToolDownloadSpec {
                 tool: RequiredTool::Node,
-                urls: vec![
-                    "https://nodejs.org/dist/v20.18.0/win-x64/node.exe",
-                ],
+                urls: vec!["https://nodejs.org/dist/v20.18.0/win-x64/node.exe"],
                 is_archive: false,
                 archive_format: None,
                 target_binaries: vec!["node.exe"],
@@ -334,9 +346,7 @@ pub fn get_download_specs() -> Vec<ToolDownloadSpec> {
             vec![
                 ToolDownloadSpec {
                     tool: RequiredTool::YtDlp,
-                    urls: vec![
-                        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp",
-                    ],
+                    urls: vec!["https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"],
                     is_archive: false,
                     archive_format: None,
                     target_binaries: vec!["yt-dlp"],
@@ -558,10 +568,7 @@ pub async fn download_file_with_wget(
 
 /// Fallback downloader using PowerShell on Windows.
 #[cfg(target_os = "windows")]
-pub async fn download_file_with_powershell(
-    url: &str,
-    dest_path: &Path,
-) -> Result<(), String> {
+pub async fn download_file_with_powershell(url: &str, dest_path: &Path) -> Result<(), String> {
     let script = format!(
         "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; (New-Object System.Net.WebClient).DownloadFile('{}', '{}')",
         url.replace('\'', "''"),
@@ -576,7 +583,10 @@ pub async fn download_file_with_powershell(
     if status.success() {
         Ok(())
     } else {
-        Err(format!("PowerShell download failed with exit status: {}", status))
+        Err(format!(
+            "PowerShell download failed with exit status: {}",
+            status
+        ))
     }
 }
 
@@ -644,7 +654,10 @@ pub async fn extract_archive(
             }
         }
 
-        return Err(format!("Failed to extract {} archive with tar or python3", format));
+        return Err(format!(
+            "Failed to extract {} archive with tar or python3",
+            format
+        ));
     }
 
     if format == "zip" {
@@ -661,7 +674,11 @@ pub async fn extract_archive(
         #[cfg(not(target_os = "windows"))]
         {
             let mut unzip_cmd = Command::new("unzip");
-            unzip_cmd.arg("-q").arg(archive_path).arg("-d").arg(extract_dir);
+            unzip_cmd
+                .arg("-q")
+                .arg(archive_path)
+                .arg("-d")
+                .arg(extract_dir);
             if let Ok(status) = unzip_cmd.status().await
                 && status.success()
             {

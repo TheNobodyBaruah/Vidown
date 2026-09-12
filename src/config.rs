@@ -265,3 +265,66 @@ pub fn save_config_full(output_dir: &str, history_limit: usize) -> std::io::Resu
     })?;
     save_config_full_to_path(&config_path, output_dir, history_limit)
 }
+
+/// Returns the standard default download directory.
+///
+/// - In automated test environments: returns "./downloads".
+/// - Windows: returns `%USERPROFILE%\Downloads` if available.
+/// - Linux/Unix: returns `$HOME/Downloads` if available.
+/// - Fallback: returns "./downloads".
+pub fn get_default_download_dir() -> String {
+    if crate::app::is_test_environment() {
+        return "./downloads".to_string();
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(profile) = std::env::var("USERPROFILE")
+            && !profile.trim().is_empty()
+        {
+            let downloads = PathBuf::from(profile.trim()).join("Downloads");
+            return downloads.to_string_lossy().to_string();
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(home) = std::env::var("HOME")
+            && !home.trim().is_empty()
+        {
+            let downloads = PathBuf::from(home.trim()).join("Downloads");
+            return downloads.to_string_lossy().to_string();
+        }
+    }
+
+    "./downloads".to_string()
+}
+
+/// Returns a guaranteed writable directory for fallback downloads if the user's
+/// chosen or default path cannot be created (e.g. read-only permissions in C:\Windows\System32).
+pub fn get_safe_fallback_dir() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(profile) = std::env::var("USERPROFILE")
+            && !profile.trim().is_empty()
+        {
+            return PathBuf::from(profile.trim()).join("Downloads");
+        }
+        if let Ok(local) = std::env::var("LOCALAPPDATA")
+            && !local.trim().is_empty()
+        {
+            return PathBuf::from(local.trim()).join("Vidown").join("downloads");
+        }
+        std::env::temp_dir().join("Vidown").join("downloads")
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Ok(home) = std::env::var("HOME")
+            && !home.trim().is_empty()
+        {
+            return PathBuf::from(home.trim()).join("Downloads");
+        }
+        std::env::temp_dir().join("vidown").join("downloads")
+    }
+}

@@ -1,6 +1,7 @@
 // src/lib.rs
 
 pub mod app;
+pub mod clipboard;
 pub mod config;
 pub mod deps;
 pub mod downloader;

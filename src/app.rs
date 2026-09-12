@@ -334,8 +334,16 @@ impl PathModal {
         self.scroll_offset = 0;
     }
 
+    pub fn insert_str(&mut self, s: &str) {
+        for c in s.chars() {
+            if c != '\r' && c != '\n' {
+                self.insert_char(c);
+            }
+        }
+    }
+
     pub fn reset_default(&mut self) {
-        self.input = "./downloads".to_string();
+        self.input = crate::config::get_default_download_dir();
         self.cursor_position = self.input.chars().count();
         self.scroll_offset = 0;
     }
@@ -345,7 +353,7 @@ impl PathModal {
 /// - Strips accidental surrounding single or double quotes
 /// - Trims leading and trailing whitespace
 /// - Treats paths literally without tilde (~) expansion
-/// - Resets empty inputs to "./downloads"
+/// - Resets empty inputs to the standard default download directory
 pub fn sanitize_path(input: &str) -> String {
     let mut trimmed = input.trim();
     while (trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2)
@@ -355,7 +363,7 @@ pub fn sanitize_path(input: &str) -> String {
         trimmed = trimmed.trim();
     }
     if trimmed.is_empty() {
-        "./downloads".to_string()
+        crate::config::get_default_download_dir()
     } else {
         trimmed.to_string()
     }
@@ -443,7 +451,7 @@ pub struct App {
 }
 
 /// Determines if the current process is running in an automated test environment.
-fn is_test_environment() -> bool {
+pub fn is_test_environment() -> bool {
     if cfg!(test) {
         return true;
     }
@@ -465,7 +473,7 @@ impl App {
     pub fn new() -> Self {
         let initial_dir = crate::config::load_config()
             .map(|p| sanitize_path(&p))
-            .unwrap_or_else(|| "./downloads".to_string());
+            .unwrap_or_else(crate::config::get_default_download_dir);
         let history_limit = crate::config::load_history_limit();
         let (persist_history, history) = if is_test_environment() {
             (false, Vec::new())
@@ -475,14 +483,13 @@ impl App {
             (true, hist)
         };
 
-        let (current_screen, setup_state) = if is_test_environment()
-            && std::env::var("VIDOWN_TEST_DEPS").is_err()
-        {
-            (CurrentScreen::Main, None)
-        } else {
-            let (_all_ok, tools) = crate::deps::check_all_dependencies();
-            (CurrentScreen::Setup, Some(SetupState::new(tools)))
-        };
+        let (current_screen, setup_state) =
+            if is_test_environment() && std::env::var("VIDOWN_TEST_DEPS").is_err() {
+                (CurrentScreen::Main, None)
+            } else {
+                let (_all_ok, tools) = crate::deps::check_all_dependencies();
+                (CurrentScreen::Setup, Some(SetupState::new(tools)))
+            };
 
         Self {
             input_buffer: String::new(),
@@ -612,6 +619,29 @@ impl App {
         self.input_mode = InputMode::Normal;
         let id = self.enqueue_download(trimmed.clone());
         Some((id, trimmed))
+    }
+
+    /// Pastes sanitized text into the URL input buffer at the current cursor position,
+    /// switching to Editing mode and advancing the cursor.
+    pub fn paste_text_to_input(&mut self, text: &str) {
+        let sanitized = crate::clipboard::sanitize_clipboard_text(text);
+        if sanitized.is_empty() {
+            return;
+        }
+        self.input_mode = InputMode::Editing;
+        let char_count = self.input_buffer.chars().count();
+        if self.cursor_position > char_count {
+            self.cursor_position = char_count;
+        }
+        let byte_idx = self
+            .input_buffer
+            .char_indices()
+            .nth(self.cursor_position)
+            .map(|(i, _)| i)
+            .unwrap_or(self.input_buffer.len());
+        self.input_buffer.insert_str(byte_idx, &sanitized);
+        self.cursor_position += sanitized.chars().count();
+        self.status_message = Some("Pasted URL from clipboard.".to_string());
     }
 
     /// Update progress for a specific download item.

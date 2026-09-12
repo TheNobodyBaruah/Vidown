@@ -3,7 +3,7 @@
 use color_eyre::Result;
 use crossterm::{
     cursor::Show,
-    event::{DisableMouseCapture, EnableMouseCapture},
+    event::{DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
@@ -13,7 +13,7 @@ use std::io::{Stdout, stdout};
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;
 
 /// Initializes the terminal: enables raw mode, enters alternate screen buffer,
-/// and installs a panic hook to safely restore the terminal if a panic occurs.
+/// enables mouse capture, enables bracketed paste, and installs a panic hook.
 pub fn init() -> Result<Tui> {
     // Install panic hook so panics don't leave the terminal in a broken state
     let original_hook = std::panic::take_hook();
@@ -24,7 +24,12 @@ pub fn init() -> Result<Tui> {
 
     enable_raw_mode()?;
     let mut out = stdout();
-    execute!(out, EnterAlternateScreen, EnableMouseCapture)?;
+    execute!(
+        out,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableBracketedPaste
+    )?;
     let backend = CrosstermBackend::new(out);
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
@@ -36,7 +41,13 @@ pub fn init() -> Result<Tui> {
 pub fn restore() -> Result<()> {
     if crossterm::terminal::is_raw_mode_enabled().unwrap_or(false) {
         let mut out = stdout();
-        let _ = execute!(out, Show, LeaveAlternateScreen, DisableMouseCapture);
+        let _ = execute!(
+            out,
+            Show,
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            DisableBracketedPaste
+        );
         let _ = disable_raw_mode();
     }
     Ok(())

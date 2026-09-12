@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use video_downloader::{
     app::App,
     downloader,
-    events::{DownloadEvent, handle_key_event},
+    events::{DownloadEvent, handle_key_event, handle_mouse_event, handle_paste_event},
     terminal, ui,
 };
 
@@ -61,6 +61,16 @@ async fn main() -> Result<()> {
                         }
                         if app.take_setup_retry() {
                             video_downloader::deps::spawn_setup_task(setup_tx.clone());
+                        }
+                    }
+                    Ok(crossterm::event::Event::Paste(text)) => {
+                        handle_paste_event(&mut app, &text);
+                    }
+                    Ok(crossterm::event::Event::Mouse(mouse_event)) => {
+                        if let Some((id, url)) = handle_mouse_event(&mut app, mouse_event) {
+                            let task_tx = tx.clone();
+                            let output_dir = PathBuf::from(&app.output_dir);
+                            tokio::spawn(downloader::perform_download(id, url, output_dir, task_tx));
                         }
                     }
                     Ok(crossterm::event::Event::Resize(..)) => {

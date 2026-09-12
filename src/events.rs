@@ -101,6 +101,18 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> Option<(usize, String)>
         return None;
     }
 
+    // Global paste shortcut: Ctrl+V, Ctrl+Shift+V, or Shift+Insert
+    let is_paste = (key.modifiers.contains(KeyModifiers::CONTROL)
+        && (key.code == KeyCode::Char('v') || key.code == KeyCode::Char('V')))
+        || (key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::Insert);
+
+    if is_paste {
+        if let Some(text) = crate::clipboard::get_clipboard_text() {
+            handle_paste_event(app, &text);
+        }
+        return None;
+    }
+
     match app.input_mode {
         InputMode::Editing => handle_editing_key(app, key),
         InputMode::Normal => handle_normal_key(app, key),
@@ -118,21 +130,40 @@ fn handle_editing_key(app: &mut App, key: KeyEvent) -> Option<(usize, String)> {
             app.input_mode = InputMode::Normal;
             None
         }
-        KeyCode::Char(c) => {
-            app.input_buffer.insert(app.cursor_position, c);
+        KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+            let char_count = app.input_buffer.chars().count();
+            if app.cursor_position > char_count {
+                app.cursor_position = char_count;
+            }
+            let byte_idx = app
+                .input_buffer
+                .char_indices()
+                .nth(app.cursor_position)
+                .map(|(i, _)| i)
+                .unwrap_or(app.input_buffer.len());
+            app.input_buffer.insert(byte_idx, c);
             app.cursor_position += 1;
             None
         }
         KeyCode::Backspace => {
             if app.cursor_position > 0 {
-                app.cursor_position -= 1;
-                app.input_buffer.remove(app.cursor_position);
+                let prev_idx = app.cursor_position - 1;
+                if let Some((byte_idx, ch)) = app.input_buffer.char_indices().nth(prev_idx) {
+                    let end_byte = byte_idx + ch.len_utf8();
+                    app.input_buffer.drain(byte_idx..end_byte);
+                    app.cursor_position -= 1;
+                }
             }
             None
         }
         KeyCode::Delete => {
-            if app.cursor_position < app.input_buffer.len() {
-                app.input_buffer.remove(app.cursor_position);
+            let count = app.input_buffer.chars().count();
+            if app.cursor_position < count
+                && let Some((byte_idx, ch)) =
+                    app.input_buffer.char_indices().nth(app.cursor_position)
+            {
+                let end_byte = byte_idx + ch.len_utf8();
+                app.input_buffer.drain(byte_idx..end_byte);
             }
             None
         }
@@ -320,17 +351,32 @@ fn handle_history_modal_key(app: &mut App, key: KeyEvent) -> Option<(usize, Stri
 fn handle_path_modal_key(app: &mut App, key: KeyEvent) {
     if key.modifiers.contains(KeyModifiers::CONTROL) {
         match key.code {
+            KeyCode::Char('v') | KeyCode::Char('V') => {
+                if let Some(text) = crate::clipboard::get_clipboard_text() {
+                    handle_paste_event(app, &text);
+                }
+                return;
+            }
             KeyCode::Char('d') | KeyCode::Char('D') => {
                 if let Some(modal) = &mut app.path_modal {
                     modal.reset_default();
                 }
+                return;
             }
             KeyCode::Char('u') | KeyCode::Char('U') => {
                 if let Some(modal) = &mut app.path_modal {
                     modal.clear();
                 }
+                return;
             }
             _ => {}
+        }
+        return;
+    }
+
+    if key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::Insert {
+        if let Some(text) = crate::clipboard::get_clipboard_text() {
+            handle_paste_event(app, &text);
         }
         return;
     }
@@ -401,23 +447,21 @@ fn handle_setup_screen_key(app: &mut App, key: KeyEvent) {
                 return;
             }
         }
-        Some(crate::app::SetupPhase::Error(_)) => {
-            match key.code {
-                KeyCode::Char('r') | KeyCode::Char('R') => {
-                    app.retry_setup();
-                    return;
-                }
-                KeyCode::Char('c') | KeyCode::Char('C') => {
-                    app.finish_setup();
-                    return;
-                }
-                KeyCode::Char('q') | KeyCode::Char('Q') => {
-                    app.should_quit = true;
-                    return;
-                }
-                _ => {}
+        Some(crate::app::SetupPhase::Error(_)) => match key.code {
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                app.retry_setup();
+                return;
             }
-        }
+            KeyCode::Char('c') | KeyCode::Char('C') => {
+                app.finish_setup();
+                return;
+            }
+            KeyCode::Char('q') | KeyCode::Char('Q') => {
+                app.should_quit = true;
+                return;
+            }
+            _ => {}
+        },
         _ => {
             // While downloading/checking, user can still press 'q' to quit
             if key.code == KeyCode::Char('q') || key.code == KeyCode::Char('Q') {
@@ -491,5 +535,117 @@ fn handle_help_modal_key(app: &mut App, key: KeyEvent) {
             }
         }
         _ => {}
+    }
+}
+
+/// Handles a paste event (from terminal bracketed paste or keyboard/mouse action).
+pub fn handle_paste_event(app: &mut App, text: &str) {
+    if let Some(modal) = &mut app.path_modal {
+        let sanitized = crate::clipboard::sanitize_clipboard_text(text);
+        modal.insert_str(&sanitized);
+        return;
+    }
+
+    if app.help_modal.is_some() || app.history_modal.is_some() || app.detail_modal.is_some() {
+        return;
+    }
+
+    if app.current_screen == crate::app::CurrentScreen::Main {
+        app.paste_text_to_input(text);
+    }
+}
+
+/// Handles mouse click, scroll, and drag interactions across the TUI.
+pub fn handle_mouse_event(
+    app: &mut App,
+    mouse: crossterm::event::MouseEvent,
+) -> Option<(usize, String)> {
+    match mouse.kind {
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right) => {
+            // Right-click pastes URL or directory from clipboard
+            if let Some(text) = crate::clipboard::get_clipboard_text() {
+                handle_paste_event(app, &text);
+            }
+            None
+        }
+        crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
+            // Left-click interaction based on current screen and modals
+            if app.help_modal.is_some() || app.detail_modal.is_some() || app.history_modal.is_some()
+            {
+                return None;
+            }
+
+            if app.path_modal.is_some() {
+                return None;
+            }
+
+            if app.current_screen == crate::app::CurrentScreen::Setup {
+                // If on setup screen and setup is complete, clicking in the footer area starts the app
+                if let Some(setup) = &app.setup_state
+                    && setup.phase == crate::app::SetupPhase::Complete
+                    && mouse.row >= 18
+                {
+                    app.finish_setup();
+                }
+                return None;
+            }
+
+            // Main screen interactions:
+            // Row 3 to 5: URL Input area (header is rows 0..3, input is rows 3..6)
+            if mouse.row >= 3 && mouse.row <= 5 {
+                app.input_mode = InputMode::Editing;
+                let col = (mouse.column as usize).saturating_sub(1);
+                let char_count = app.input_buffer.chars().count();
+                app.cursor_position = col.min(char_count);
+                return None;
+            }
+
+            // Row >= 6: Downloads list area
+            if mouse.row >= 6 {
+                app.input_mode = InputMode::Normal;
+                let list_row = (mouse.row as usize).saturating_sub(7);
+                let clicked_idx = list_row / 3;
+                if !app.downloads.is_empty() {
+                    let new_selected = clicked_idx.min(app.downloads.len() - 1);
+                    if app.selected_download == new_selected {
+                        // Re-clicking on already selected item opens error/log details
+                        app.open_selected_details();
+                    } else {
+                        app.selected_download = new_selected;
+                    }
+                }
+            }
+
+            None
+        }
+        crossterm::event::MouseEventKind::ScrollDown => {
+            if let Some(m) = &mut app.help_modal {
+                m.scroll_down(100);
+            } else if let Some(m) = &mut app.history_modal {
+                m.next(app.history.len());
+            } else if app.detail_modal.is_some() {
+                app.modal_scroll_down();
+            } else if app.current_screen == crate::app::CurrentScreen::Setup {
+                app.setup_scroll_down();
+            } else if app.current_screen == crate::app::CurrentScreen::Main {
+                app.next_download();
+            }
+            None
+        }
+        crossterm::event::MouseEventKind::ScrollUp => {
+            if let Some(m) = &mut app.help_modal {
+                m.scroll_up();
+            } else if let Some(m) = &mut app.history_modal {
+                m.previous(app.history.len());
+            } else if app.detail_modal.is_some() {
+                app.modal_scroll_up();
+            } else if app.current_screen == crate::app::CurrentScreen::Setup {
+                app.setup_scroll_up();
+            } else if app.current_screen == crate::app::CurrentScreen::Main {
+                app.previous_download();
+            }
+            None
+        }
+        _ => None,
     }
 }
