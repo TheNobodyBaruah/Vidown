@@ -150,18 +150,15 @@ pub async fn perform_download(
         cmd.arg("--ffmpeg-location").arg(ffmpeg_loc);
     }
 
-    // Conditionally include --js-runtimes node with exact path or graceful fallback
-    if let Some(node_path) =
-        crate::deps::find_in_user_bin("node").or_else(|| crate::deps::find_in_path("node"))
-    {
-        cmd.arg("--js-runtimes")
-            .arg(format!("node:{}", node_path.display()));
-    } else if is_node_available() {
+    // Conditionally include --js-runtimes node if Node.js is available
+    if is_node_available() {
         cmd.arg("--js-runtimes").arg("node");
     }
 
     cmd.arg("--force-overwrites")
         .arg("--newline")
+        .arg("--windows-filenames")
+        .arg("--no-mtime")
         .arg("-f")
         .arg("bestvideo[vcodec^=avc]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best")
         .arg("--merge-output-format")

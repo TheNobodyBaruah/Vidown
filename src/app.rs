@@ -610,15 +610,15 @@ impl App {
 
     /// Submit the URL currently in the input buffer.
     pub fn submit_input(&mut self) -> Option<(usize, String)> {
-        let trimmed = self.input_buffer.trim().to_string();
-        if trimmed.is_empty() {
+        let sanitized = crate::clipboard::sanitize_clipboard_text(&self.input_buffer);
+        if sanitized.is_empty() {
             return None;
         }
         self.input_buffer.clear();
         self.cursor_position = 0;
         self.input_mode = InputMode::Normal;
-        let id = self.enqueue_download(trimmed.clone());
-        Some((id, trimmed))
+        let id = self.enqueue_download(sanitized.clone());
+        Some((id, sanitized))
     }
 
     /// Pastes sanitized text into the URL input buffer at the current cursor position,
@@ -626,6 +626,7 @@ impl App {
     pub fn paste_text_to_input(&mut self, text: &str) {
         let sanitized = crate::clipboard::sanitize_clipboard_text(text);
         if sanitized.is_empty() {
+            self.status_message = Some("Clipboard contains no valid text.".to_string());
             return;
         }
         self.input_mode = InputMode::Editing;

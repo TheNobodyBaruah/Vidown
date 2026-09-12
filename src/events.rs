@@ -109,6 +109,8 @@ pub fn handle_key_event(app: &mut App, key: KeyEvent) -> Option<(usize, String)>
     if is_paste {
         if let Some(text) = crate::clipboard::get_clipboard_text() {
             handle_paste_event(app, &text);
+        } else {
+            app.status_message = Some("Clipboard is empty or unavailable.".to_string());
         }
         return None;
     }
@@ -174,7 +176,7 @@ fn handle_editing_key(app: &mut App, key: KeyEvent) -> Option<(usize, String)> {
             None
         }
         KeyCode::Right => {
-            if app.cursor_position < app.input_buffer.len() {
+            if app.cursor_position < app.input_buffer.chars().count() {
                 app.cursor_position += 1;
             }
             None
@@ -184,7 +186,7 @@ fn handle_editing_key(app: &mut App, key: KeyEvent) -> Option<(usize, String)> {
             None
         }
         KeyCode::End => {
-            app.cursor_position = app.input_buffer.len();
+            app.cursor_position = app.input_buffer.chars().count();
             None
         }
         _ => None,
@@ -201,7 +203,7 @@ fn handle_normal_key(app: &mut App, key: KeyEvent) -> Option<(usize, String)> {
             }
             KeyCode::Char('i') | KeyCode::Enter => {
                 app.input_mode = InputMode::Editing;
-                app.cursor_position = app.input_buffer.len();
+                app.cursor_position = app.input_buffer.chars().count();
                 None
             }
             KeyCode::Char('j') | KeyCode::Down => {
@@ -241,14 +243,20 @@ fn handle_normal_key(app: &mut App, key: KeyEvent) -> Option<(usize, String)> {
             }
             KeyCode::Char('a') => {
                 app.input_mode = InputMode::Editing;
-                if app.cursor_position < app.input_buffer.len() {
+                if app.cursor_position < app.input_buffer.chars().count() {
                     app.cursor_position += 1;
                 }
                 None
             }
             KeyCode::Char('x') => {
-                if !app.input_buffer.is_empty() && app.cursor_position < app.input_buffer.len() {
-                    app.input_buffer.remove(app.cursor_position);
+                let char_count = app.input_buffer.chars().count();
+                if char_count > 0
+                    && app.cursor_position < char_count
+                    && let Some((byte_idx, ch)) =
+                        app.input_buffer.char_indices().nth(app.cursor_position)
+                {
+                    let end_byte = byte_idx + ch.len_utf8();
+                    app.input_buffer.drain(byte_idx..end_byte);
                 }
                 None
             }
@@ -257,7 +265,7 @@ fn handle_normal_key(app: &mut App, key: KeyEvent) -> Option<(usize, String)> {
                 None
             }
             KeyCode::Char('$') => {
-                app.cursor_position = app.input_buffer.len();
+                app.cursor_position = app.input_buffer.chars().count();
                 None
             }
             KeyCode::Char('j') | KeyCode::Down => {
@@ -354,6 +362,8 @@ fn handle_path_modal_key(app: &mut App, key: KeyEvent) {
             KeyCode::Char('v') | KeyCode::Char('V') => {
                 if let Some(text) = crate::clipboard::get_clipboard_text() {
                     handle_paste_event(app, &text);
+                } else {
+                    app.status_message = Some("Clipboard is empty or unavailable.".to_string());
                 }
                 return;
             }
@@ -377,6 +387,8 @@ fn handle_path_modal_key(app: &mut App, key: KeyEvent) {
     if key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::Insert {
         if let Some(text) = crate::clipboard::get_clipboard_text() {
             handle_paste_event(app, &text);
+        } else {
+            app.status_message = Some("Clipboard is empty or unavailable.".to_string());
         }
         return;
     }
@@ -542,7 +554,12 @@ fn handle_help_modal_key(app: &mut App, key: KeyEvent) {
 pub fn handle_paste_event(app: &mut App, text: &str) {
     if let Some(modal) = &mut app.path_modal {
         let sanitized = crate::clipboard::sanitize_clipboard_text(text);
-        modal.insert_str(&sanitized);
+        if !sanitized.is_empty() {
+            modal.insert_str(&sanitized);
+            app.status_message = Some("Pasted path from clipboard.".to_string());
+        } else {
+            app.status_message = Some("Clipboard contains no valid text.".to_string());
+        }
         return;
     }
 
@@ -562,9 +579,15 @@ pub fn handle_mouse_event(
 ) -> Option<(usize, String)> {
     match mouse.kind {
         crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Right) => {
+            // If help, detail, or history modal is active, right click is ignored
+            if app.help_modal.is_some() || app.detail_modal.is_some() || app.history_modal.is_some() {
+                return None;
+            }
             // Right-click pastes URL or directory from clipboard
             if let Some(text) = crate::clipboard::get_clipboard_text() {
                 handle_paste_event(app, &text);
+            } else {
+                app.status_message = Some("Clipboard is empty or unavailable.".to_string());
             }
             None
         }
@@ -600,18 +623,32 @@ pub fn handle_mouse_event(
                 return None;
             }
 
-            // Row >= 6: Downloads list area
-            if mouse.row >= 6 {
-                app.input_mode = InputMode::Normal;
-                let list_row = (mouse.row as usize).saturating_sub(7);
-                let clicked_idx = list_row / 3;
-                if !app.downloads.is_empty() {
-                    let new_selected = clicked_idx.min(app.downloads.len() - 1);
-                    if app.selected_download == new_selected {
-                        // Re-clicking on already selected item opens error/log details
-                        app.open_selected_details();
-                    } else {
-                        app.selected_download = new_selected;
+            // Downloads list items area (starts at row 7, each item occupies 3 lines)
+            if mouse.row >= 7 && !app.downloads.is_empty() {
+                let term_height = crossterm::terminal::size().map(|(_, h)| h).unwrap_or(24);
+                let downloads_height = term_height.saturating_sub(9);
+                let inner_height = downloads_height.saturating_sub(2);
+                let visible_items_count = (inner_height / 3).max(1) as usize;
+                let start_idx = if app.selected_download >= visible_items_count {
+                    app.selected_download + 1 - visible_items_count
+                } else {
+                    0
+                };
+                let displayed_count =
+                    visible_items_count.min(app.downloads.len().saturating_sub(start_idx));
+                let max_item_row = 7 + (displayed_count as u16 * 3);
+
+                if mouse.row < max_item_row {
+                    let slot = ((mouse.row - 7) / 3) as usize;
+                    let clicked_idx = start_idx + slot;
+                    if clicked_idx < app.downloads.len() {
+                        app.input_mode = InputMode::Normal;
+                        if app.selected_download == clicked_idx {
+                            // Re-clicking on already selected item opens error/log details
+                            app.open_selected_details();
+                        } else {
+                            app.selected_download = clicked_idx;
+                        }
                     }
                 }
             }
@@ -625,6 +662,8 @@ pub fn handle_mouse_event(
                 m.next(app.history.len());
             } else if app.detail_modal.is_some() {
                 app.modal_scroll_down();
+            } else if app.path_modal.is_some() {
+                // Do not scroll background downloads while path modal is active
             } else if app.current_screen == crate::app::CurrentScreen::Setup {
                 app.setup_scroll_down();
             } else if app.current_screen == crate::app::CurrentScreen::Main {
@@ -639,6 +678,8 @@ pub fn handle_mouse_event(
                 m.previous(app.history.len());
             } else if app.detail_modal.is_some() {
                 app.modal_scroll_up();
+            } else if app.path_modal.is_some() {
+                // Do not scroll background downloads while path modal is active
             } else if app.current_screen == crate::app::CurrentScreen::Setup {
                 app.setup_scroll_up();
             } else if app.current_screen == crate::app::CurrentScreen::Main {
