@@ -24,6 +24,9 @@ Vidown adheres strictly to the **Model-View-Update (MVU / Elm)** architecture, r
   - `Track 1`: High-definition video stream download.
   - `Track 2`: High-quality audio stream download.
   - `Merging`: Real-time notification when FFmpeg multiplexes audio and video into a clean `.mp4` container.
+- **Full Mouse & Clipboard Support**:
+  - **Mouse Interactions**: Left-click to focus the URL input bar or select download items; double-click an item to inspect detailed logs; right-click anywhere to paste from clipboard; scroll wheel to navigate download lists, help guide, and modal views.
+  - **Clipboard Integration**: Paste URLs or folder paths seamlessly using standard shortcuts (<kbd>Ctrl</kbd>+<kbd>V</kbd>, <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>V</kbd>, <kbd>Shift</kbd>+<kbd>Insert</kbd>, or right-click). Automatically trims surrounding quotes and whitespace.
 - **Dual Keybinding Schemes**:
   - **Standard Modal**: Simple `i`/`Enter` to edit URLs, `Esc` for Normal mode, `q` to quit.
   - **Vim Mode**: Full Vim navigation (`0`, `$`, `x`, `a`, `i`, `j`, `k`).
@@ -264,6 +267,20 @@ Press <kbd>F2</kbd> at any time in Normal mode to toggle schemes:
 
 ---
 
+## Mouse Controls Reference
+
+| Action | Context | Description |
+|---|---|---|
+| **Left Click** | URL Bar | Focus input bar and enter `[EDITING]` mode |
+| **Left Click** | Downloads List | Select clicked download item |
+| **Double Click** (or 2nd click) | Downloads List | Open Details & Logs viewer for selected download |
+| **Right Click** | Main Screen | Read clipboard and paste URL directly into input bar |
+| **Right Click** | Path Modal | Paste clipboard folder path into input field |
+| **Scroll Wheel (Up / Down)** | Downloads / Modals | Scroll download list, logs modal, help guide, or history |
+| **Left Click** | Setup Screen | Dismiss setup screen and launch app once dependencies are ready |
+
+---
+
 ## Output Directory & Configuration
 
 By default, downloaded media files are saved in the **`downloads/`** subdirectory:
@@ -307,13 +324,37 @@ Vidown/
 │   ├── downloader.rs        # Domain Layer: yt-dlp & FFmpeg asynchronous execution
 │   └── terminal.rs          # Safe terminal lifecycle and panic recovery
 └── tests/
-    ├── app_tests.rs         # Unit tests for state transitions, path modal, and key handling
-    ├── deps_tests.rs        # Unit tests for dependency detection, setup screen, and help modal
-    ├── history_tests.rs     # Unit tests for history persistence, FIFO limits, and file manager
-    ├── config_tests.rs      # Unit tests for TOML serialization, parsing, and persistence
-    ├── downloader_tests.rs  # Unit tests for progress regex & parsing logic
-    └── ui_tests.rs          # Buffer-level, TestBackend, and 80x24 layout integration tests
+    ├── app_tests.rs             # Unit tests for state transitions, path modal, and key handling
+    ├── cli_tests.rs             # Unit tests for CLI arguments (--version, --help)
+    ├── clipboard_mouse_tests.rs # Unit tests for clipboard paste, mouse click/scroll, and sandbox dirs
+    ├── deps_tests.rs            # Unit tests for dependency detection, setup screen, and help modal
+    ├── history_tests.rs         # Unit tests for history persistence, FIFO limits, and file manager
+    ├── config_tests.rs          # Unit tests for TOML serialization, parsing, and persistence
+    ├── downloader_tests.rs      # Unit tests for progress regex & parsing logic
+    └── ui_tests.rs              # Buffer-level, TestBackend, and 80x24 layout integration tests
 ```
+
+---
+
+## Releasing & GitHub CI/CD
+
+Vidown uses GitHub Actions (`.github/workflows/release.yml`) to automatically compile, package, and publish multi-platform release binaries to GitHub Releases:
+
+- **Automatic Release via Git Tag**:
+  Pushing a release tag matching `v*` triggers the automated CI/CD pipeline:
+  ```bash
+  git tag v0.1.2
+  git push origin v0.1.2
+  ```
+  The workflow compiles binaries with static CRT on Windows (`x86_64-pc-windows-msvc`) and glibc on Linux (`x86_64-unknown-linux-gnu`), bundles release archives, computes SHA-256 checksums, and publishes the release assets to GitHub Releases.
+- **Manual Workflow Dispatch**:
+  Releases can also be triggered manually directly from the GitHub repository:
+  Navigate to **Actions** &rarr; **Release** &rarr; **Run workflow**, with an optional custom tag name input.
+- **Direct Asset Download URLs**:
+  Releases provide both versioned and canonical unversioned download links:
+  - Windows: `https://github.com/TheNobodyBaruah/Vidown/releases/latest/download/vidown-windows-x86_64.zip`
+  - Linux: `https://github.com/TheNobodyBaruah/Vidown/releases/latest/download/vidown-linux-x86_64.tar.gz`
+- *Note: Commits pushed directly to `main` without creating a git tag update the repository source code, but do not generate or publish new pre-compiled binaries to GitHub Releases.*
 
 ---
 

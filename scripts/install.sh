@@ -94,9 +94,8 @@ if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
 fi
 
 if [ -z "$DOWNLOAD_URL" ] || [ "$DOWNLOAD_URL" = "null" ]; then
-    echo "Error: Could not find linux-x86_64 release asset from $API_URL." >&2
-    echo "Please ensure a release has been published at https://github.com/${REPO}/releases." >&2
-    exit 1
+    echo "==> Falling back to direct latest release download URL..."
+    DOWNLOAD_URL="https://github.com/${REPO}/releases/latest/download/vidown-linux-x86_64.tar.gz"
 fi
 
 TMP_DIR=$(mktemp -d)
@@ -123,6 +122,12 @@ $SUDO chmod 755 "$INSTALL_DIR/$BIN_NAME"
 echo "==> Creating symlink $INSTALL_DIR/$LINK_NAME -> $INSTALL_DIR/$BIN_NAME..."
 $SUDO rm -f "$INSTALL_DIR/$LINK_NAME"
 $SUDO ln -sfn "$INSTALL_DIR/$BIN_NAME" "$INSTALL_DIR/$LINK_NAME"
+
+# Verify installed binary and display version
+VER_OUTPUT=$("$INSTALL_DIR/$BIN_NAME" --version 2>/dev/null || true)
+if [ -n "$VER_OUTPUT" ]; then
+    echo "==> Installed binary version: $VER_OUTPUT"
+fi
 
 echo "==> Vidown installed successfully!"
 echo "==> You can now run 'Vidown' or 'vidown' in your terminal."

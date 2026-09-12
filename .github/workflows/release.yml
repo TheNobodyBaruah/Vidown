@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.1.2, defaults to version in Cargo.toml)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -49,40 +54,52 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
-          if [[ "${GITHUB_REF_NAME}" =~ ^v?[0-9] ]]; then
+          INPUT_TAG="${{ github.event.inputs.tag }}"
+          if [[ -n "$INPUT_TAG" && "$INPUT_TAG" =~ ^v?[0-9] ]]; then
+            VERSION="${INPUT_TAG#v}"
+          elif [[ "${GITHUB_REF_NAME}" =~ ^v?[0-9] ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
             VERSION=$(grep '^version =' Cargo.toml | head -1 | cut -d '"' -f 2)
           fi
           ARCHIVE="vidown-v${VERSION}-${{ matrix.archive_suffix }}"
-          echo "Packaging $ARCHIVE..."
+          UNVERSIONED_ARCHIVE="vidown-${{ matrix.archive_suffix }}"
+          echo "Packaging $ARCHIVE and $UNVERSIONED_ARCHIVE..."
           cp "target/${{ matrix.target }}/release/vidown" .
           chmod +x vidown
           tar -czvf "$ARCHIVE" vidown README.md LICENSE
+          cp "$ARCHIVE" "$UNVERSIONED_ARCHIVE"
           mkdir -p dist
           mv "$ARCHIVE" dist/
+          mv "$UNVERSIONED_ARCHIVE" dist/
 
       - name: Package release archive (Windows)
         if: matrix.os == 'windows-latest'
         shell: pwsh
         run: |
+          $inputTag = "${{ github.event.inputs.tag }}"
           $refName = $env:GITHUB_REF_NAME
-          if ($refName -match '^v?[0-9]') {
+          if ($inputTag -and ($inputTag -match '^v?[0-9]')) {
+              $version = $inputTag -replace '^v', ''
+          } elseif ($refName -match '^v?[0-9]') {
               $version = $refName -replace '^v', ''
           } else {
               $cargo = Get-Content Cargo.toml -Raw
               if ($cargo -match 'version\s*=\s*"([^"]+)"') {
                   $version = $matches[1]
               } else {
-                  $version = "0.1.0"
+                  $version = "0.1.2"
               }
           }
           $archive = "vidown-v$version-${{ matrix.archive_suffix }}"
-          Write-Host "Packaging $archive..."
+          $unversionedArchive = "vidown-${{ matrix.archive_suffix }}"
+          Write-Host "Packaging $archive and $unversionedArchive..."
           Copy-Item "target/${{ matrix.target }}/release/vidown.exe" -Destination .
           Compress-Archive -Path vidown.exe, README.md, LICENSE -DestinationPath $archive
+          Copy-Item -Path $archive -Destination $unversionedArchive -Force
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           Move-Item $archive dist/
+          Move-Item $unversionedArchive dist/
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -115,7 +132,13 @@ jobs:
         id: release_tag
         shell: bash
         run: |
-          if [[ "${GITHUB_REF_NAME}" =~ ^v?[0-9] ]]; then
+          INPUT_TAG="${{ github.event.inputs.tag }}"
+          if [[ -n "$INPUT_TAG" && "$INPUT_TAG" =~ ^v?[0-9] ]]; then
+            TAG="$INPUT_TAG"
+            if [[ ! "$TAG" =~ ^v ]]; then
+              TAG="v${TAG}"
+            fi
+          elif [[ "${GITHUB_REF_NAME}" =~ ^v?[0-9] ]]; then
             TAG="${GITHUB_REF_NAME}"
             if [[ ! "$TAG" =~ ^v ]]; then
               TAG="v${TAG}"

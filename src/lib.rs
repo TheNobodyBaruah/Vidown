@@ -17,8 +17,51 @@ pub mod history;
 pub mod terminal;
 pub mod ui;
 
+/// CLI argument action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CliAction {
+    Version,
+    Help,
+    RunApp,
+}
+
+/// Parses command-line arguments to determine whether to display version, help, or launch the TUI.
+pub fn handle_cli_args<I, T>(args: I) -> CliAction
+where
+    I: IntoIterator<Item = T>,
+    T: AsRef<str>,
+{
+    let args: Vec<String> = args.into_iter().map(|s| s.as_ref().to_string()).collect();
+    for arg in args.iter().skip(1) {
+        match arg.as_str() {
+            "--version" | "-v" | "-V" => return CliAction::Version,
+            "--help" | "-h" => return CliAction::Help,
+            _ => {}
+        }
+    }
+    CliAction::RunApp
+}
+
 /// Main application runner: initializes terminal, processes events, and manages download tasks.
 pub async fn run() -> Result<()> {
+    // Handle simple CLI flags before taking over the terminal
+    let args: Vec<String> = std::env::args().collect();
+    match handle_cli_args(&args) {
+        CliAction::Version => {
+            println!("vidown {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
+        CliAction::Help => {
+            println!("Vidown - An Asynchronous Terminal-Based Video Downloader in Rust\n");
+            println!("Usage: vidown [OPTIONS]\n");
+            println!("Options:");
+            println!("  -v, -V, --version    Print version information and exit");
+            println!("  -h, --help           Print help information and exit");
+            return Ok(());
+        }
+        CliAction::RunApp => {}
+    }
+
     // Initialize color-eyre for clear, graceful error reports
     color_eyre::install()?;
 

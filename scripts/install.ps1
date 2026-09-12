@@ -115,28 +115,44 @@ if (-not (Test-Path $vcRuntimeDll)) {
     }
 }
 
+$downloadUrl = $null
+$assetName = $null
+$releaseTag = $null
+
 $ApiUrl = if ($env:VIDOWN_API_URL) { $env:VIDOWN_API_URL } else { "https://api.github.com/repos/$Repo/releases/latest" }
 Write-Host "==> Fetching latest release information from GitHub ($ApiUrl)..." -ForegroundColor Cyan
 
 try {
     $release = Invoke-RestMethod -Uri $ApiUrl -Headers @{ "User-Agent" = "Vidown-Installer" }
+    if ($release.tag_name) {
+        $releaseTag = $release.tag_name
+    }
+    $asset = $release.assets | Where-Object { $_.name -like "*windows-x86_64.zip" } | Select-Object -First 1
+    if ($asset) {
+        $downloadUrl = $asset.browser_download_url
+        $assetName = $asset.name
+    }
 } catch {
-    Write-Error "Failed to query GitHub Releases API at $ApiUrl. If no release has been published yet, please create a release at https://github.com/$Repo/releases. Details: $_"
-    exit 1
+    Write-Warning "Could not query GitHub Releases API: $_"
 }
 
-$asset = $release.assets | Where-Object { $_.name -like "*windows-x86_64.zip" } | Select-Object -First 1
-if (-not $asset) {
-    Write-Error "Could not find a windows-x86_64.zip asset in the latest release. Please verify that a release exists at https://github.com/$Repo/releases."
-    exit 1
+if (-not $downloadUrl) {
+    Write-Host "==> Falling back to direct latest release asset URL..." -ForegroundColor Yellow
+    $downloadUrl = "https://github.com/$Repo/releases/latest/download/vidown-windows-x86_64.zip"
+    $assetName = "vidown-windows-x86_64.zip"
+    $releaseTag = "latest"
 }
 
 $tempZip = Join-Path $env:TEMP ("vidown-install-" + [System.Guid]::NewGuid().ToString() + ".zip")
 $tempExtract = Join-Path $env:TEMP ("vidown-extract-" + [System.Guid]::NewGuid().ToString())
 
 try {
-    Write-Host "==> Downloading $($asset.name)..." -ForegroundColor Cyan
-    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $tempZip -UseBasicParsing
+    if ($releaseTag -and $releaseTag -ne "latest") {
+        Write-Host "==> Downloading $assetName ($releaseTag)..." -ForegroundColor Cyan
+    } else {
+        Write-Host "==> Downloading $assetName from $downloadUrl..." -ForegroundColor Cyan
+    }
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $tempZip -UseBasicParsing
 
     Write-Host "==> Extracting archive..." -ForegroundColor Cyan
     Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
@@ -162,6 +178,16 @@ try {
         Copy-Item -Path $foundExe.FullName -Destination $targetExeCap -Force -ErrorAction SilentlyContinue
     } catch {
         # File system is case-insensitive; vidown.exe already matches both vidown and Vidown
+    }
+
+    # Verify installed binary and display version
+    try {
+        $ver = & $targetExe --version 2>&1
+        if ($ver) {
+            Write-Host "==> Installed binary version: $ver" -ForegroundColor Green
+        }
+    } catch {
+        # Non-critical if binary execution check fails
     }
 
     # 5. Configure Machine PATH
